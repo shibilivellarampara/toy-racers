@@ -1,9 +1,16 @@
-import { Car, DEFAULT_TUNING, resolveCarCollision } from "./physics";
+import { Car, DEFAULT_TUNING, resolveCarCollision, resolveStaticCollision } from "./physics";
 import type { InputManager } from "./input";
 import { resolveTrackCollision, startPosition, updateLapProgress } from "./track";
 import type { TrackDef } from "./track";
 import type { NetMessage, PlayerInfo } from "../net/protocol";
 import { sound } from "./sound";
+import { crossingBlocking, crossingLightsActive } from "./crossing";
+
+export interface ImpactEffect {
+  x: number;
+  y: number;
+  atMs: number;
+}
 
 export interface RemoteCarView {
   info: PlayerInfo;
@@ -42,12 +49,19 @@ export class RaceSession {
 
   countdownMs = 0;
   started = false;
+  /** Race-wide clock, independent of any single car's finish state — this is
+   * what the railway crossing's timing and every finish time is based on,
+   * so they stay correct/consistent regardless of who's finished. */
+  elapsedMs = 0;
+  impacts: ImpactEffect[] = [];
 
   private readonly sendFn: (msg: NetMessage) => void;
   private finishedIds = new Set<string>();
   private placeCounter = 1;
   private sendAccumulator = 0;
   private bumpCooldown = 0;
+  private wasCrossingWarning = false;
+  private wasCrossingBlocking = false;
   private roster: PlayerInfo[];
 
   constructor(
@@ -115,7 +129,7 @@ export class RaceSession {
         remote.car.lap = msg.lap;
         remote.car.nextCheckpoint = msg.cp;
         remote.boosting = msg.boost;
-        if (msg.fin && this.isHost) this.checkFinish(msg.id, remote.car.raceTimeMs);
+        if (msg.fin && this.isHost) this.checkFinish(msg.id, this.elapsedMs);
         remote.car.finished = msg.fin;
         return;
       }
@@ -153,22 +167,52 @@ export class RaceSession {
     return this.results.length >= this.remotes.size + 1;
   }
 
+  private updateCrossingAudio() {
+    const warning = crossingLightsActive(this.elapsedMs);
+    if (warning && !this.wasCrossingWarning) sound.crossingBell();
+    this.wasCrossingWarning = warning;
+
+    const blocking = crossingBlocking(this.elapsedMs);
+    if (blocking && !this.wasCrossingBlocking) sound.trainHorn();
+    this.wasCrossingBlocking = blocking;
+  }
+
   update(dt: number) {
     if (this.countdownMs > 0) {
       this.countdownMs = Math.max(0, this.countdownMs - dt * 1000);
       if (this.countdownMs === 0) this.started = true;
     }
 
+    if (this.started) {
+      this.elapsedMs += dt * 1000;
+      this.updateCrossingAudio();
+    }
+    this.impacts = this.impacts.filter((imp) => this.elapsedMs - imp.atMs < 500);
+
     if (this.started && !this.localCar.finished) {
       const input = this.input.getInput();
       this.localCar.step(dt, input);
       resolveTrackCollision(this.localCar, this.track);
       this.bumpCooldown = Math.max(0, this.bumpCooldown - dt);
+      let hitSomethingSolid = false;
       for (const remote of this.remotes.values()) {
-        if (resolveCarCollision(this.localCar, remote.car) && this.bumpCooldown <= 0) {
-          sound.bump();
-          this.bumpCooldown = 0.35;
-        }
+        if (resolveCarCollision(this.localCar, remote.car)) hitSomethingSolid = true;
+      }
+      for (const barricade of this.track.barricades) {
+        if (resolveStaticCollision(this.localCar, barricade)) hitSomethingSolid = true;
+      }
+      if (crossingBlocking(this.elapsedMs)) {
+        const gate = {
+          x: this.track.crossing.x,
+          y: this.track.crossing.y,
+          radius: this.track.crossing.width / 2 + 6,
+        };
+        if (resolveStaticCollision(this.localCar, gate)) hitSomethingSolid = true;
+      }
+      if (hitSomethingSolid && this.bumpCooldown <= 0) {
+        sound.bump();
+        this.impacts.push({ x: this.localCar.x, y: this.localCar.y, atMs: this.elapsedMs });
+        this.bumpCooldown = 0.35;
       }
       if (this.localCar.boostCooldown <= 0) {
         for (const pad of this.track.boostPads) {
@@ -191,7 +235,7 @@ export class RaceSession {
       const completedNow = updateLapProgress(this.localCar, this.track);
       if (completedNow) {
         if (this.isHost) {
-          this.checkFinish(this.localInfo.id, this.localCar.raceTimeMs);
+          this.checkFinish(this.localInfo.id, this.elapsedMs);
         } else {
           this.sendFn({
             type: "state",

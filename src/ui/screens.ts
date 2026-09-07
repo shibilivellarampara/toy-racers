@@ -1,10 +1,9 @@
 import { h, button } from "./dom";
 import { buildTrack, DEFAULT_TRACK_ID, TRACK_LIST, LAPS_TO_WIN } from "../game/track";
 import type { TrackDef } from "../game/track";
-import { applyCamera, drawCar, drawMinimap, drawTrack } from "../game/renderer";
+import { applyCamera, drawCar, drawImpactEffects, drawMinimap, drawTrack, drawUnderpassDeck } from "../game/renderer";
 import type { RenderCar } from "../game/renderer";
 import { InputManager } from "../game/input";
-import type { ControlScheme } from "../game/input";
 import { GameLoop } from "../game/loop";
 import { RaceSession } from "../game/race";
 import { sound } from "../game/sound";
@@ -19,17 +18,17 @@ const PROFILE_KEY = "toy-racers:profile";
 interface Profile {
   name: string;
   color: string;
-  controlScheme: ControlScheme;
+  muted: boolean;
 }
 
 function loadProfile(): Profile {
   try {
     const raw = localStorage.getItem(PROFILE_KEY);
-    if (raw) return { controlScheme: "joystick", ...JSON.parse(raw) };
+    if (raw) return { muted: false, ...JSON.parse(raw) };
   } catch {
     /* ignore */
   }
-  return { name: "Racer", color: PLAYER_COLORS[0], controlScheme: "joystick" };
+  return { name: "Racer", color: PLAYER_COLORS[0], muted: false };
 }
 
 function saveProfile(p: Profile) {
@@ -87,6 +86,7 @@ export class App {
     mount.append(this.canvas, this.uiRoot);
     this.ctx = this.canvas.getContext("2d")!;
     this.track = buildTrack(this.selectedMapId);
+    sound.setMuted(this.profile.muted);
 
     window.addEventListener("resize", this.resizeCanvas);
     window.addEventListener("orientationchange", this.onOrientationChange);
@@ -200,20 +200,12 @@ export class App {
       }),
     );
 
-    const schemeEl = h("div", "map-list");
-    const renderScheme = () => {
-      schemeEl.replaceChildren(
-        ...(["joystick", "buttons"] as ControlScheme[]).map((s) => {
-          const label = s === "joystick" ? "Joystick" : "Buttons";
-          return button(label, `map-option${s === this.profile.controlScheme ? " selected" : ""}`, () => {
-            this.profile.controlScheme = s;
-            saveProfile(this.profile);
-            renderScheme();
-          });
-        }),
-      );
-    };
-    renderScheme();
+    const muteBtn = button(this.profile.muted ? "🔇 Off" : "🔊 On", "map-option", () => {
+      this.profile.muted = !this.profile.muted;
+      saveProfile(this.profile);
+      sound.setMuted(this.profile.muted);
+      muteBtn.textContent = this.profile.muted ? "🔇 Off" : "🔊 On";
+    });
 
     const screen = h(
       "div",
@@ -226,7 +218,7 @@ export class App {
       ),
       h("label", "field-label", "Name", nameInput),
       h("label", "field-label", "Color", swatches),
-      h("div", "field-label", "Steering", schemeEl),
+      h("div", "field-label", "Sound", muteBtn),
       h(
         "div",
         "menu-actions",
@@ -303,7 +295,9 @@ export class App {
     };
 
     const startBtn = button("Start Race", "btn btn-primary btn-start", () => {
-      this.beginHostRace(hostLobby);
+      startBtn.disabled = true;
+      addPlayerBtn.disabled = true;
+      this.runLobbyCountdown(() => this.beginHostRace(hostLobby));
     });
 
     const mapEl = h("div", "map-list");
@@ -335,8 +329,30 @@ export class App {
     this.setScreen(screen);
   }
 
+  // Shown in the host's lobby only, before the race screen (and its own
+  // separate 3s in-race countdown) ever appears — gives the host a moment
+  // after clicking Start Race before everyone gets dropped into the race.
+  private runLobbyCountdown(onDone: () => void, seconds = 5) {
+    let remaining = seconds;
+    const numberEl = h("div", "lobby-countdown-number", String(remaining));
+    const overlay = h("div", "lobby-countdown-overlay", numberEl, h("p", "lobby-countdown-label", "Get ready…"));
+    document.body.appendChild(overlay);
+    sound.unlock();
+    const tick = () => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        overlay.remove();
+        onDone();
+        return;
+      }
+      numberEl.textContent = String(remaining);
+      setTimeout(tick, 1000);
+    };
+    setTimeout(tick, 1000);
+  }
+
   private beginHostRace(hostLobby: HostLobby) {
-    const input = new InputManager(this.profile.controlScheme);
+    const input = new InputManager();
     const race = new RaceSession(
       this.track,
       hostLobby.localPlayer,
@@ -444,7 +460,7 @@ export class App {
   }
 
   private beginGuestRace(guestLobby: GuestLobby) {
-    const input = new InputManager(this.profile.controlScheme);
+    const input = new InputManager();
     const race = new RaceSession(
       this.track,
       guestLobby.localPlayer,
@@ -577,8 +593,8 @@ export class App {
     const h2 = this.canvas.clientHeight;
 
     ctx.save();
-    applyCamera(ctx, w, h2, race.localCar.x, race.localCar.y);
-    drawTrack(ctx, this.track);
+    applyCamera(ctx, w, h2, race.localCar.x, race.localCar.y, undefined, this.dpr);
+    drawTrack(ctx, this.track, race.elapsedMs);
 
     const cars: RenderCar[] = [
       {
@@ -597,6 +613,10 @@ export class App {
       })),
     ];
     for (const rc of cars) drawCar(ctx, rc);
+    // After the cars, so it visually passes over them instead of them
+    // driving on top of it.
+    drawUnderpassDeck(ctx, this.track);
+    drawImpactEffects(ctx, race.impacts, race.elapsedMs);
     ctx.restore();
 
     ctx.save();
@@ -616,8 +636,10 @@ export class App {
     lapEl.textContent = `Lap ${Math.min(race.localCar.lap + 1, LAPS_TO_WIN)} / ${LAPS_TO_WIN}`;
     timerEl.textContent = formatTime(race.localCar.raceTimeMs);
 
-    const speed = Math.round(Math.abs(race.localCar.speed) / 4);
-    const top = Math.round(race.localCar.topSpeed / 4);
+    // Divisor tuned so the car's absolute max speed (boosted) displays as
+    // exactly 100 km/h — the physics max is 460 * 1.55 boost = 713.
+    const speed = Math.round(Math.abs(race.localCar.speed) / 7.13);
+    const top = Math.round(race.localCar.topSpeed / 7.13);
     speedEl.textContent = `${speed} km/h  ·  top ${top}`;
 
     standingsEl.replaceChildren(

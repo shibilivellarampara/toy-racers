@@ -1,4 +1,5 @@
 import type { CarInput } from "./physics";
+import { sound } from "./sound";
 
 export type ControlScheme = "joystick" | "buttons";
 
@@ -15,9 +16,29 @@ const KEY_MAP: Record<string, keyof typeof KEYS_DEFAULT> = {
 
 const KEYS_DEFAULT = { up: false, down: false, left: false, right: false };
 
+// If the OS/browser interrupts a touch mid-press (app switch, notification,
+// tab hidden) the matching pointerup/pointercancel can simply never arrive,
+// which is what makes a touch control "lock" pressed forever. Every control
+// registers a force-release callback here so losing focus always clears
+// everything, regardless of why the normal event never showed up.
+const forceReleaseCallbacks = new Set<() => void>();
+function registerForceRelease(fn: () => void): () => void {
+  forceReleaseCallbacks.add(fn);
+  return () => forceReleaseCallbacks.delete(fn);
+}
+if (typeof window !== "undefined") {
+  const releaseAll = () => forceReleaseCallbacks.forEach((fn) => fn());
+  window.addEventListener("blur", releaseAll);
+  window.addEventListener("pointercancel", releaseAll);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) releaseAll();
+  });
+}
+
 class TouchButton {
   private active = new Set<number>();
   readonly el: HTMLDivElement;
+  private unregister: () => void;
 
   constructor(label: string, className: string) {
     this.el = document.createElement("div");
@@ -26,8 +47,17 @@ class TouchButton {
     this.el.style.touchAction = "none";
     const add = (e: PointerEvent) => {
       e.preventDefault();
+      sound.unlock();
       this.active.add(e.pointerId);
       this.el.classList.add("pressed");
+      // Guarantees pointerup/pointercancel for this pointer always land on
+      // this element, even if the finger drifts off it before release —
+      // without this, release() can simply never fire.
+      try {
+        this.el.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
     };
     const remove = (e: PointerEvent) => {
       this.active.delete(e.pointerId);
@@ -37,11 +67,20 @@ class TouchButton {
     this.el.addEventListener("pointerup", remove);
     this.el.addEventListener("pointercancel", remove);
     this.el.addEventListener("pointerleave", remove);
+    this.el.addEventListener("lostpointercapture", remove);
     this.el.addEventListener("contextmenu", (e) => e.preventDefault());
+    this.unregister = registerForceRelease(() => {
+      this.active.clear();
+      this.el.classList.remove("pressed");
+    });
   }
 
   get pressed() {
     return this.active.size > 0;
+  }
+
+  destroy() {
+    this.unregister();
   }
 }
 
@@ -54,6 +93,7 @@ class Joystick {
   private originX = 0;
   private originY = 0;
   private value = 0; // -1..1, horizontal only
+  private unregister: () => void;
 
   constructor() {
     this.el = document.createElement("div");
@@ -65,8 +105,13 @@ class Joystick {
 
     this.el.addEventListener("pointerdown", (e) => {
       e.preventDefault();
+      sound.unlock();
       this.activeId = e.pointerId;
-      this.el.setPointerCapture(e.pointerId);
+      try {
+        this.el.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
       const rect = this.el.getBoundingClientRect();
       this.originX = rect.left + rect.width / 2;
       this.originY = rect.top + rect.height / 2;
@@ -78,13 +123,23 @@ class Joystick {
     });
     const release = (e: PointerEvent) => {
       if (e.pointerId !== this.activeId) return;
-      this.activeId = null;
-      this.value = 0;
-      this.knob.style.transform = "translate(0px, 0px)";
+      this.reset();
     };
     this.el.addEventListener("pointerup", release);
     this.el.addEventListener("pointercancel", release);
+    this.el.addEventListener("lostpointercapture", release);
     this.el.addEventListener("contextmenu", (e) => e.preventDefault());
+    this.unregister = registerForceRelease(() => this.reset());
+  }
+
+  private reset() {
+    this.activeId = null;
+    this.value = 0;
+    this.knob.style.transform = "translate(0px, 0px)";
+  }
+
+  destroy() {
+    this.unregister();
   }
 
   private updateFromEvent(e: PointerEvent) {
@@ -182,6 +237,11 @@ export class InputManager {
   destroy() {
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
+    this.joystick?.destroy();
+    this.touch.gas.destroy();
+    this.touch.brake.destroy();
+    this.touch.left?.destroy();
+    this.touch.right?.destroy();
     this.element.remove();
   }
 }

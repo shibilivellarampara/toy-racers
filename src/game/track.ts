@@ -9,6 +9,7 @@ export interface BoostPad {
   x: number;
   y: number;
   radius: number;
+  angle: number; // track direction here, so the chevrons point the right way
 }
 
 export interface Pothole {
@@ -21,9 +22,13 @@ export interface Pothole {
 export interface SceneryItem {
   x: number;
   y: number;
-  type: "tree" | "bush" | "rock";
+  type: "tree" | "bush" | "rock" | "deer" | "elephant";
   scale: number;
   rotation: number;
+  // Only animals use this — a per-item random phase so deer/elephants
+  // wander around their spawn point instead of sitting still like the
+  // trees/bushes/rocks.
+  roamSeed: number;
 }
 
 export interface GrassPatch {
@@ -31,6 +36,20 @@ export interface GrassPatch {
   y: number;
   r: number;
   shade: number; // -1..1, darker/lighter than the base grass color
+}
+
+export interface Barricade {
+  x: number;
+  y: number;
+  radius: number;
+  angle: number; // orientation across the track, for rendering
+}
+
+export interface CrossingDef {
+  x: number;
+  y: number;
+  angle: number; // track direction at that point
+  width: number;
 }
 
 export interface TrackDef {
@@ -44,9 +63,12 @@ export interface TrackDef {
   centerY: number;
   boostPads: BoostPad[];
   potholes: Pothole[];
+  barricades: Barricade[];
   scenery: SceneryItem[];
   grassPatches: GrassPatch[];
   bridge: { x: number; y: number; angle: number; width: number };
+  crossing: CrossingDef;
+  underpass: { x: number; y: number; angle: number; width: number };
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
@@ -107,6 +129,11 @@ const TECHNICAL_TWISTER: Centerline = [
   [2350, 1050, 260], // continue right sweeper toward start
 ];
 
+interface BarricadeSpec {
+  progress: number;
+  side: 1 | -1;
+}
+
 interface TrackOption {
   id: string;
   name: string;
@@ -114,6 +141,9 @@ interface TrackOption {
   boostProgress: number[];
   potholeProgress: number[];
   bridgeProgress: number;
+  crossingProgress: number;
+  underpassProgress: number;
+  barricades: BarricadeSpec[];
 }
 
 export const TRACK_LIST: TrackOption[] = [
@@ -124,6 +154,15 @@ export const TRACK_LIST: TrackOption[] = [
     boostProgress: [0.04, 0.58, 0.86],
     potholeProgress: [0.2, 0.48, 0.75, 0.93],
     bridgeProgress: 0.31,
+    crossingProgress: 0.4,
+    // On the straight run into the finish line (the final segment before
+    // wrapping back to progress 0), with enough buffer that it doesn't
+    // overlap the starting grid.
+    underpassProgress: 0.96,
+    barricades: [
+      { progress: 0.12, side: 1 },
+      { progress: 0.66, side: -1 },
+    ],
   },
   {
     id: "oval",
@@ -132,6 +171,15 @@ export const TRACK_LIST: TrackOption[] = [
     boostProgress: [0.1, 0.4, 0.65, 0.9],
     potholeProgress: [0.25, 0.52, 0.78],
     bridgeProgress: 0.5,
+    crossingProgress: 0.97,
+    // The back straightaway (this wide oval's straights sit at the ends of
+    // its minor axis, not its major axis — counterintuitive, but the tight
+    // turns are at the left/right tips and the flat run is top/bottom).
+    underpassProgress: 0.72,
+    barricades: [
+      { progress: 0.17, side: 1 },
+      { progress: 0.58, side: -1 },
+    ],
   },
   {
     id: "twister",
@@ -140,6 +188,15 @@ export const TRACK_LIST: TrackOption[] = [
     boostProgress: [0.03, 0.42, 0.72],
     potholeProgress: [0.18, 0.55, 0.85],
     bridgeProgress: 0.38,
+    crossingProgress: 0.28,
+    // On the run into the finish line (final segment before wrapping back
+    // to progress 0), past the barricade at 0.94 with room to spare before
+    // the starting grid.
+    underpassProgress: 0.97,
+    barricades: [
+      { progress: 0.63, side: 1 },
+      { progress: 0.94, side: -1 },
+    ],
   },
 ];
 export const DEFAULT_TRACK_ID = TRACK_LIST[0].id;
@@ -153,7 +210,15 @@ const LAPS_TO_WIN = 3;
 const CHECKPOINT_COUNT = 24;
 
 function buildTrackFromCenterline(option: TrackOption): TrackDef {
-  const { centerline: centerlineTriples, boostProgress, potholeProgress, bridgeProgress } = option;
+  const {
+    centerline: centerlineTriples,
+    boostProgress,
+    potholeProgress,
+    bridgeProgress,
+    crossingProgress,
+    underpassProgress,
+    barricades: barricadeSpecs,
+  } = option;
   const centerline = centerlineTriples.map(([x, y]) => ({ x, y }));
   const widths = centerlineTriples.map(([, , w]) => w);
   const n = centerline.length;
@@ -204,7 +269,22 @@ function buildTrackFromCenterline(option: TrackOption): TrackDef {
     const pt = pointAtProgress(centerline, cumLen, totalLen, p, 26);
     return { ...pt, rotation: Math.random() * Math.PI * 2 };
   });
-  const bridge = bridgeAtProgress(centerline, widths, cumLen, totalLen, bridgeProgress);
+  const bridgePt = trackPointAtProgress(centerline, normals, widths, cumLen, totalLen, bridgeProgress);
+  const bridge = { x: bridgePt.x, y: bridgePt.y, angle: bridgePt.angle, width: bridgePt.width };
+  const crossingPt = trackPointAtProgress(centerline, normals, widths, cumLen, totalLen, crossingProgress);
+  const crossing = { x: crossingPt.x, y: crossingPt.y, angle: crossingPt.angle, width: crossingPt.width };
+  const underpassPt = trackPointAtProgress(centerline, normals, widths, cumLen, totalLen, underpassProgress);
+  const underpass = { x: underpassPt.x, y: underpassPt.y, angle: underpassPt.angle, width: underpassPt.width };
+  const barricades: Barricade[] = barricadeSpecs.map((spec) => {
+    const p = trackPointAtProgress(centerline, normals, widths, cumLen, totalLen, spec.progress);
+    const offset = spec.side * p.width * 0.28;
+    return {
+      x: p.x + p.nx * offset,
+      y: p.y + p.ny * offset,
+      radius: Math.max(18, p.width * 0.22),
+      angle: p.angle,
+    };
+  });
   const scenery = generateScenery(outer, inner, bounds);
   const grassPatches = generateGrassPatches(bounds);
 
@@ -219,20 +299,34 @@ function buildTrackFromCenterline(option: TrackOption): TrackDef {
     centerY,
     boostPads,
     potholes,
+    barricades,
     scenery,
     grassPatches,
     bridge,
+    crossing,
+    underpass,
     bounds,
   };
 }
 
-function bridgeAtProgress(
+interface TrackPoint {
+  x: number;
+  y: number;
+  angle: number;
+  width: number;
+  nx: number;
+  ny: number;
+}
+
+/** Interpolated position/direction/width/normal at an arbitrary point along the loop. */
+function trackPointAtProgress(
   centerline: Point[],
+  normals: Point[],
   widths: number[],
   cumLen: number[],
   totalLen: number,
   progress: number,
-): { x: number; y: number; angle: number; width: number } {
+): TrackPoint {
   const target = progress * totalLen;
   const n = centerline.length;
   for (let i = 0; i < n; i++) {
@@ -244,11 +338,17 @@ function bridgeAtProgress(
       const t = (target - segStart) / (segEnd - segStart || 1);
       const width = lerp(widths[i], widths[(i + 1) % n], t);
       const angle = Math.atan2(b.y - a.y, b.x - a.x);
-      return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), angle, width };
+      const na = normals[i];
+      const nb = normals[(i + 1) % n];
+      const nx = lerp(na.x, nb.x, t);
+      const ny = lerp(na.y, nb.y, t);
+      const nlen = Math.hypot(nx, ny) || 1;
+      return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), angle, width, nx: nx / nlen, ny: ny / nlen };
     }
   }
   const last = centerline[n - 1];
-  return { x: last.x, y: last.y, angle: 0, width: widths[n - 1] };
+  const ln = normals[n - 1];
+  return { x: last.x, y: last.y, angle: 0, width: widths[n - 1], nx: ln.x, ny: ln.y };
 }
 
 type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
@@ -257,13 +357,24 @@ function generateScenery(outer: Point[], inner: Point[], bounds: Bounds): Scener
   const items: SceneryItem[] = [];
   // Weighted toward trees so the surroundings read as a proper treeline
   // rather than a sparse scatter of mixed props.
-  const weightedTypes: SceneryItem["type"][] = ["tree", "tree", "tree", "bush", "bush", "rock"];
+  const weightedTypes: SceneryItem["type"][] = [
+    "tree",
+    "tree",
+    "tree",
+    "tree",
+    "bush",
+    "bush",
+    "rock",
+    "deer",
+    "elephant",
+  ];
   const randomItem = (x: number, y: number): SceneryItem => ({
     x,
     y,
     type: weightedTypes[Math.floor(Math.random() * weightedTypes.length)],
     scale: 0.7 + Math.random() * 0.9,
     rotation: Math.random() * Math.PI * 2,
+    roamSeed: Math.random() * 1000,
   });
 
   // Outside the track, in the surrounding grass.
@@ -314,11 +425,12 @@ function pointAtProgress(
       const a = centerline[i];
       const b = centerline[(i + 1) % n];
       const t = (target - segStart) / (segEnd - segStart || 1);
-      return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), radius };
+      const angle = Math.atan2(b.y - a.y, b.x - a.x);
+      return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), radius, angle };
     }
   }
   const last = centerline[n - 1];
-  return { x: last.x, y: last.y, radius };
+  return { x: last.x, y: last.y, radius, angle: 0 };
 }
 
 function perpUnit(a: Point, b: Point): Point {

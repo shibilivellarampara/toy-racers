@@ -29,7 +29,7 @@ export const BOOST_DURATION = 2.5; // seconds
 export const BOOST_COOLDOWN = 4; // seconds before a pad can retrigger on the same car
 const BOOST_SPEED_MULT = 1.55;
 const BOOST_ACCEL_MULT = 1.8;
-const POTHOLE_SPEED_LOSS = 0.35; // fraction of speed shed on impact
+const POTHOLE_SPEED_LOSS = 0.5; // fraction of speed shed on impact
 export const POTHOLE_COOLDOWN = 1.2; // seconds before the same pothole can retrigger
 
 export class Car {
@@ -178,6 +178,28 @@ export function resolveCarCollision(car: Car, other: Car): boolean {
   const dy = other.y - car.y;
   const dist = Math.hypot(dx, dy);
   const minDist = car.tuning.radius + other.tuning.radius;
+  if (dist <= 0 || dist >= minDist) return false;
+
+  const nx = dx / dist;
+  const ny = dy / dist;
+  const overlap = minDist - dist;
+  car.x -= nx * overlap;
+  car.y -= ny * overlap;
+
+  const into = car.vx * nx + car.vy * ny;
+  if (into > 0) {
+    car.vx -= nx * into * 1.3;
+    car.vy -= ny * into * 1.3;
+  }
+  return true;
+}
+
+/** Same shape as resolveCarCollision but against a fixed point (barricades, closed rail gates). */
+export function resolveStaticCollision(car: Car, obstacle: { x: number; y: number; radius: number }): boolean {
+  const dx = obstacle.x - car.x;
+  const dy = obstacle.y - car.y;
+  const dist = Math.hypot(dx, dy);
+  const minDist = car.tuning.radius + obstacle.radius;
   if (dist <= 0 || dist >= minDist) return false;
 
   const nx = dx / dist;

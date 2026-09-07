@@ -6,8 +6,20 @@
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private enabled = true;
+  private muted = false;
   private engineOsc: OscillatorNode | null = null;
   private engineGain: GainNode | null = null;
+
+  setMuted(muted: boolean) {
+    this.muted = muted;
+    if (muted && this.engineGain && this.ctx) {
+      this.engineGain.gain.setTargetAtTime(0.0001, this.ctx.currentTime, 0.05);
+    }
+  }
+
+  get isMuted() {
+    return this.muted;
+  }
 
   private ensure(): AudioContext | null {
     if (!this.enabled) return null;
@@ -18,6 +30,14 @@ class SoundEngine {
         this.enabled = false;
         return null;
       }
+      // Mobile browsers suspend the context when the tab/app is
+      // backgrounded. Resuming from a bare visibilitychange handler isn't
+      // a user gesture, so it isn't guaranteed to work everywhere, but it
+      // costs nothing to try — the real fix is unlock() being called again
+      // from the next actual tap (see input.ts touch controls).
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) this.ctx?.resume().catch(() => {});
+      });
     }
     if (this.ctx.state === "suspended") this.ctx.resume().catch(() => {});
     return this.ctx;
@@ -32,6 +52,7 @@ class SoundEngine {
     duration: number,
     opts: { type?: OscillatorType; volume?: number; glideTo?: number; delay?: number } = {},
   ) {
+    if (this.muted) return;
     const ctx = this.ensure();
     if (!ctx) return;
     const start = ctx.currentTime + (opts.delay ?? 0);
@@ -67,6 +88,19 @@ class SoundEngine {
     this.tone(660, 0.15, { type: "triangle", volume: 0.14 });
   }
 
+  /** Railway crossing warning bell — a few alternating dings. */
+  crossingBell() {
+    for (let i = 0; i < 4; i++) {
+      this.tone(950, 0.14, { type: "square", volume: 0.13, delay: i * 0.28 });
+    }
+  }
+
+  /** Classic two-tone train horn. */
+  trainHorn() {
+    this.tone(196, 0.5, { type: "sawtooth", volume: 0.18 });
+    this.tone(262, 0.5, { type: "sawtooth", volume: 0.14 });
+  }
+
   finish() {
     this.tone(523, 0.15, { type: "triangle", volume: 0.2 });
     this.tone(659, 0.15, { type: "triangle", volume: 0.2, delay: 0.15 });
@@ -94,7 +128,7 @@ class SoundEngine {
     if (!ctx || !this.engineOsc || !this.engineGain) return;
     const clamped = Math.max(0, Math.min(1.6, speedRatio));
     const freq = 70 + clamped * 260;
-    const volume = clamped > 0.02 ? 0.04 + Math.min(clamped, 1) * 0.06 : 0.0001;
+    const volume = this.muted || clamped <= 0.02 ? 0.0001 : 0.04 + Math.min(clamped, 1) * 0.06;
     this.engineOsc.frequency.setTargetAtTime(freq, ctx.currentTime, 0.08);
     this.engineGain.gain.setTargetAtTime(volume, ctx.currentTime, 0.12);
   }
