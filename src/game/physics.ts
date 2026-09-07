@@ -123,9 +123,12 @@ export class Car {
       this.speed = clampedSpeed;
     }
 
-    // Steering: turn heading based on speed ratio (can't pivot standing still).
+    // Steering: ramps to full turn rate quickly (by ~20% of max speed) so the
+    // car feels responsive, but still can't pivot in place when stopped.
+    // Sign matches direction of travel so reversing steers the "right" way.
     const speedRatio = clamp(this.speed / t.maxSpeed, -1, 1);
-    this.angle += input.steer * t.turnRate * speedRatio * dt;
+    const turnResponse = Math.sign(speedRatio) * Math.min(1, Math.abs(speedRatio) / 0.2);
+    this.angle += input.steer * t.turnRate * turnResponse * dt;
 
     // Grip: blend velocity vector back toward the heading direction so the
     // car doesn't drift forever, but still slides a bit through corners.

@@ -261,6 +261,19 @@ body {
   z-index: 50;
   padding: 20px;
 }
+.pause-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 6, 15, 0.75);
+  display: flex;
+  align-items: center;
+  align-items: safe center;
+  justify-content: center;
+  justify-content: safe center;
+  z-index: 60;
+  padding: 20px;
+  overflow-y: auto;
+}
 .scan-video {
   width: min(80vw, 360px);
   aspect-ratio: 1;
@@ -412,6 +425,11 @@ body {
 .touch-btn.pressed {
   background: rgba(255, 255, 255, 0.3);
 }
+.touch-steer {
+  width: 64px;
+  height: 64px;
+  font-size: 22px;
+}
 .touch-brake {
   width: 56px;
   height: 56px;
@@ -498,5 +516,9 @@ body {
   .joystick-base {
     width: 92px;
     height: 92px;
+  }
+  .touch-steer {
+    width: 58px;
+    height: 58px;
   }
 }

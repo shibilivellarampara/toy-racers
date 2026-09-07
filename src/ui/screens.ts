@@ -4,6 +4,7 @@ import type { TrackDef } from "../game/track";
 import { applyCamera, drawCar, drawMinimap, drawTrack } from "../game/renderer";
 import type { RenderCar } from "../game/renderer";
 import { InputManager } from "../game/input";
+import type { ControlScheme } from "../game/input";
 import { GameLoop } from "../game/loop";
 import { RaceSession } from "../game/race";
 import { sound } from "../game/sound";
@@ -14,35 +15,49 @@ import { renderQR, startQRScan } from "../net/qr";
 import type { QRScanner } from "../net/qr";
 
 const PROFILE_KEY = "toy-racers:profile";
-const QR_PREFIX = "TR:";
 
 interface Profile {
   name: string;
   color: string;
+  controlScheme: ControlScheme;
 }
 
 function loadProfile(): Profile {
   try {
     const raw = localStorage.getItem(PROFILE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) return { controlScheme: "joystick", ...JSON.parse(raw) };
   } catch {
     /* ignore */
   }
-  return { name: "Racer", color: PLAYER_COLORS[0] };
+  return { name: "Racer", color: PLAYER_COLORS[0], controlScheme: "joystick" };
 }
 
 function saveProfile(p: Profile) {
   localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
 }
 
+// A real app URL (not just a short code) so scanning with the phone's own
+// camera app opens Toy Racers directly and joins, without needing the
+// in-app scanner already open.
 function codeToQrPayload(code: string) {
-  return QR_PREFIX + code;
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.searchParams.set("code", code);
+  return url.toString();
 }
 
 function qrPayloadToCode(text: string): string {
-  const m = text.trim().match(/^TR:(\d{4})$/);
-  if (!m) throw new Error("That's not a Toy Racers code. Try typing the 4-digit code instead.");
-  return m[1];
+  const trimmed = text.trim();
+  try {
+    const url = new URL(trimmed);
+    const code = url.searchParams.get("code");
+    if (code && /^\d{4}$/.test(code)) return code;
+  } catch {
+    /* not a URL, fall through */
+  }
+  const m = trimmed.match(/^TR:(\d{4})$/);
+  if (m) return m[1];
+  throw new Error("That's not a Toy Racers code. Try typing the 4-digit code instead.");
 }
 
 export class App {
@@ -51,6 +66,7 @@ export class App {
   private ctx: CanvasRenderingContext2D;
   private track: TrackDef;
   private selectedMapId: string = DEFAULT_TRACK_ID;
+  private dpr = 1;
 
   private input?: InputManager;
   private loop?: GameLoop;
@@ -76,16 +92,30 @@ export class App {
     window.addEventListener("orientationchange", this.onOrientationChange);
     window.visualViewport?.addEventListener("resize", this.resizeCanvas);
     this.resizeCanvas();
-    this.showMenu();
+
+    const deepLinkCode = new URLSearchParams(window.location.search).get("code");
+    history.replaceState(null, "", window.location.pathname);
+    if (deepLinkCode && /^\d{4}$/.test(deepLinkCode)) {
+      this.showJoinLobby(deepLinkCode);
+    } else {
+      this.showMenu();
+    }
   }
 
   private resizeCanvas = () => {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.canvas.width = Math.floor(window.innerWidth * dpr);
-    this.canvas.height = Math.floor(window.innerHeight * dpr);
-    this.canvas.style.width = window.innerWidth + "px";
-    this.canvas.style.height = window.innerHeight + "px";
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // visualViewport tracks the actually-visible area on mobile (accounting
+    // for on-screen keyboards / browser chrome); innerWidth/innerHeight can
+    // lag behind it, which is what causes the canvas to drift out of sync
+    // with the rest of the UI on some phones.
+    const vv = window.visualViewport;
+    const width = Math.round(vv?.width ?? window.innerWidth);
+    const height = Math.round(vv?.height ?? window.innerHeight);
+    this.dpr = Math.min(2, window.devicePixelRatio || 1);
+    this.canvas.width = Math.floor(width * this.dpr);
+    this.canvas.height = Math.floor(height * this.dpr);
+    this.canvas.style.width = width + "px";
+    this.canvas.style.height = height + "px";
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
   };
 
   // iOS can report stale innerWidth/innerHeight for a beat right after
@@ -113,6 +143,7 @@ export class App {
     this.input = undefined;
     this.race = undefined;
     this.resultsShown = false;
+    sound.stopEngine();
   }
 
   // ---------------------------------------------------------------- Menu --
@@ -152,6 +183,21 @@ export class App {
       }),
     );
 
+    const schemeEl = h("div", "map-list");
+    const renderScheme = () => {
+      schemeEl.replaceChildren(
+        ...(["joystick", "buttons"] as ControlScheme[]).map((s) => {
+          const label = s === "joystick" ? "Joystick" : "Buttons";
+          return button(label, `map-option${s === this.profile.controlScheme ? " selected" : ""}`, () => {
+            this.profile.controlScheme = s;
+            saveProfile(this.profile);
+            renderScheme();
+          });
+        }),
+      );
+    };
+    renderScheme();
+
     const screen = h(
       "div",
       "screen menu-screen",
@@ -163,6 +209,7 @@ export class App {
       ),
       h("label", "field-label", "Name", nameInput),
       h("label", "field-label", "Color", swatches),
+      h("div", "field-label", "Steering", schemeEl),
       h(
         "div",
         "menu-actions",
@@ -271,7 +318,7 @@ export class App {
   }
 
   private beginHostRace(hostLobby: HostLobby) {
-    const input = new InputManager();
+    const input = new InputManager(this.profile.controlScheme);
     const race = new RaceSession(
       this.track,
       hostLobby.localPlayer,
@@ -289,7 +336,7 @@ export class App {
 
   // ---------------------------------------------------------- Join lobby --
 
-  private showJoinLobby() {
+  private showJoinLobby(prefillCode?: string) {
     const guestLobby = new GuestLobby(this.profile.name, this.profile.color);
 
     const statusEl = h("p", "status-text", "Ask your host for their 4-digit code.");
@@ -371,10 +418,15 @@ export class App {
       button("Back", "btn btn-ghost", () => this.showMenu()),
     );
     this.setScreen(screen);
+
+    if (prefillCode) {
+      codeInput.value = prefillCode;
+      connect(prefillCode);
+    }
   }
 
   private beginGuestRace(guestLobby: GuestLobby) {
-    const input = new InputManager();
+    const input = new InputManager(this.profile.controlScheme);
     const race = new RaceSession(
       this.track,
       guestLobby.localPlayer,
@@ -396,6 +448,7 @@ export class App {
     document.body.classList.add("racing");
     this.prevCountdownSecond = -1;
     this.prevLap = 0;
+    sound.startEngine();
 
     const hud = h(
       "div",
@@ -406,7 +459,7 @@ export class App {
       h("div", "hud-standings"),
       h("div", "hud-countdown"),
       h("div", "hud-boost-flash", "BOOST!"),
-      button("☰ Menu", "hud-quit-btn", () => this.showMenu()),
+      button("☰ Menu", "hud-quit-btn", () => this.openPauseMenu()),
     );
 
     this.stopScanner();
@@ -414,6 +467,46 @@ export class App {
 
     this.loop = new GameLoop((dt) => this.frame(dt, hud));
     this.loop.start();
+  }
+
+  private openPauseMenu() {
+    const race = this.race;
+    if (!race || !this.loop) return;
+    this.loop.stop();
+    sound.updateEngine(0);
+
+    const close = () => overlay.remove();
+    const resume = () => {
+      close();
+      this.loop?.start();
+    };
+    const restart = () => {
+      close();
+      const hostLobby = this.activeHostLobby;
+      this.teardownRace();
+      if (hostLobby) this.beginHostRace(hostLobby);
+      else this.showMenu();
+    };
+
+    const overlay = h(
+      "div",
+      "pause-overlay",
+      h(
+        "div",
+        "screen",
+        h("h2", "title", "Paused"),
+        h(
+          "div",
+          "menu-actions",
+          button("▶ Resume", "btn btn-primary", resume),
+          race.isHost
+            ? button("⟲ Restart Race", "btn btn-secondary", restart)
+            : h("p", "hint", "Only the host can restart the race."),
+          button("🏠 Main Menu", "btn btn-ghost", () => this.showMenu()),
+        ),
+      ),
+    );
+    this.uiRoot.appendChild(overlay);
   }
 
   private frame(dt: number, hud: HTMLElement) {
@@ -444,6 +537,11 @@ export class App {
       this.prevCountdownSecond = 0;
     }
 
+    const speedRatio = race.started
+      ? Math.abs(race.localCar.speed) / race.localCar.tuning.maxSpeed
+      : 0;
+    sound.updateEngine(speedRatio);
+
     if (race.localCar.lap > this.prevLap) {
       this.prevLap = race.localCar.lap;
       if (!race.localCar.finished) sound.lap();
@@ -452,8 +550,8 @@ export class App {
 
   private render(race: RaceSession) {
     const ctx = this.ctx;
-    const w = this.canvas.width / (window.devicePixelRatio || 1);
-    const h2 = this.canvas.height / (window.devicePixelRatio || 1);
+    const w = this.canvas.width / this.dpr;
+    const h2 = this.canvas.height / this.dpr;
 
     ctx.save();
     applyCamera(ctx, w, h2, race.localCar.x, race.localCar.y);
@@ -479,7 +577,7 @@ export class App {
     ctx.restore();
 
     ctx.save();
-    ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     drawMinimap(ctx, w, this.track, cars);
     ctx.restore();
   }

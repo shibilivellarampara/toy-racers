@@ -6,6 +6,8 @@
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private enabled = true;
+  private engineOsc: OscillatorNode | null = null;
+  private engineGain: GainNode | null = null;
 
   private ensure(): AudioContext | null {
     if (!this.enabled) return null;
@@ -69,6 +71,46 @@ class SoundEngine {
     this.tone(523, 0.15, { type: "triangle", volume: 0.2 });
     this.tone(659, 0.15, { type: "triangle", volume: 0.2, delay: 0.15 });
     this.tone(784, 0.35, { type: "triangle", volume: 0.22, delay: 0.3 });
+  }
+
+  /** Starts a continuous engine drone; call updateEngine() every frame to track speed. */
+  startEngine() {
+    const ctx = this.ensure();
+    if (!ctx || this.engineOsc) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.value = 70;
+    gain.gain.value = 0.0001;
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    this.engineOsc = osc;
+    this.engineGain = gain;
+  }
+
+  /** speedRatio: 0 (stopped) to ~1.6 (boosted top speed). */
+  updateEngine(speedRatio: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.engineOsc || !this.engineGain) return;
+    const clamped = Math.max(0, Math.min(1.6, speedRatio));
+    const freq = 70 + clamped * 260;
+    const volume = clamped > 0.02 ? 0.04 + Math.min(clamped, 1) * 0.06 : 0.0001;
+    this.engineOsc.frequency.setTargetAtTime(freq, ctx.currentTime, 0.08);
+    this.engineGain.gain.setTargetAtTime(volume, ctx.currentTime, 0.12);
+  }
+
+  stopEngine() {
+    if (this.engineOsc) {
+      try {
+        this.engineOsc.stop();
+      } catch {
+        /* already stopped */
+      }
+      this.engineOsc.disconnect();
+      this.engineGain?.disconnect();
+    }
+    this.engineOsc = null;
+    this.engineGain = null;
   }
 }
 

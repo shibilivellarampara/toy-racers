@@ -1,5 +1,7 @@
 import type { CarInput } from "./physics";
 
+export type ControlScheme = "joystick" | "buttons";
+
 const KEY_MAP: Record<string, keyof typeof KEYS_DEFAULT> = {
   ArrowUp: "up",
   ArrowDown: "down",
@@ -104,16 +106,18 @@ class Joystick {
 
 export class InputManager {
   private keys = { ...KEYS_DEFAULT };
-  private joystick: Joystick;
+  private joystick: Joystick | null = null;
   private touch: {
     gas: TouchButton;
     brake: TouchButton;
+    left: TouchButton | null;
+    right: TouchButton | null;
   };
   /** Touch control buttons, not attached to the DOM yet — the caller decides where/when. */
   readonly element: HTMLDivElement;
   enabled = true;
 
-  constructor() {
+  constructor(scheme: ControlScheme = "joystick") {
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
 
@@ -122,8 +126,18 @@ export class InputManager {
 
     const steerWrap = document.createElement("div");
     steerWrap.className = "touch-group touch-group--left";
-    const joystick = new Joystick();
-    steerWrap.appendChild(joystick.el);
+
+    let left: TouchButton | null = null;
+    let right: TouchButton | null = null;
+    if (scheme === "buttons") {
+      left = new TouchButton("◀", "touch-steer");
+      right = new TouchButton("▶", "touch-steer");
+      steerWrap.appendChild(left.el);
+      steerWrap.appendChild(right.el);
+    } else {
+      this.joystick = new Joystick();
+      steerWrap.appendChild(this.joystick.el);
+    }
 
     const pedalWrap = document.createElement("div");
     pedalWrap.className = "touch-group touch-group--right";
@@ -135,8 +149,7 @@ export class InputManager {
     this.element.appendChild(steerWrap);
     this.element.appendChild(pedalWrap);
 
-    this.joystick = joystick;
-    this.touch = { gas, brake };
+    this.touch = { gas, brake, left, right };
 
     if (!isTouchDevice()) {
       this.element.style.display = "none";
@@ -155,9 +168,9 @@ export class InputManager {
 
   getInput(): CarInput {
     if (!this.enabled) return { throttle: 0, steer: 0 };
-    let steer = this.joystick.steer;
-    if (this.keys.left) steer -= 1;
-    if (this.keys.right) steer += 1;
+    let steer = this.joystick?.steer ?? 0;
+    if (this.keys.left || this.touch.left?.pressed) steer -= 1;
+    if (this.keys.right || this.touch.right?.pressed) steer += 1;
 
     let throttle = 0;
     if (this.keys.up || this.touch.gas.pressed) throttle += 1;
