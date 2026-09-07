@@ -18,6 +18,7 @@ export type NetMessage =
       lap: number;
       cp: number;
       fin: boolean;
+      boost: boolean;
     }
   | { type: "finish"; id: string; place: number; timeMs: number }
   | { type: "leave"; id: string };

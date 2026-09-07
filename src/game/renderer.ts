@@ -1,44 +1,32 @@
 import type { Car } from "./physics";
-import type { RoundedRect, TrackDef } from "./track";
+import type { Point, TrackDef } from "./track";
 
 export interface RenderCar {
   car: Car;
   color: string;
   label: string;
   isLocal: boolean;
+  boosting: boolean;
 }
 
-function roundedRectPath(ctx: CanvasRenderingContext2D, rect: RoundedRect) {
-  const { cx, cy, hw, hh, r } = rect;
-  ctx.beginPath();
-  ctx.moveTo(cx - hw + r, cy - hh);
-  ctx.lineTo(cx + hw - r, cy - hh);
-  ctx.arcTo(cx + hw, cy - hh, cx + hw, cy - hh + r, r);
-  ctx.lineTo(cx + hw, cy + hh - r);
-  ctx.arcTo(cx + hw, cy + hh, cx + hw - r, cy + hh, r);
-  ctx.lineTo(cx - hw + r, cy + hh);
-  ctx.arcTo(cx - hw, cy + hh, cx - hw, cy + hh - r, r);
-  ctx.lineTo(cx - hw, cy - hh + r);
-  ctx.arcTo(cx - hw, cy - hh, cx - hw + r, cy - hh, r);
+function polygonPath(ctx: CanvasRenderingContext2D, pts: Point[]) {
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
   ctx.closePath();
 }
 
 export function drawTrack(ctx: CanvasRenderingContext2D, track: TrackDef) {
   ctx.save();
   // grass
+  const b = track.bounds;
   ctx.fillStyle = "#1c6b3c";
-  ctx.fillRect(
-    track.outer.cx - track.outer.hw - 200,
-    track.outer.cy - track.outer.hh - 200,
-    track.outer.hw * 2 + 400,
-    track.outer.hh * 2 + 400,
-  );
+  ctx.fillRect(b.minX - 250, b.minY - 250, b.maxX - b.minX + 500, b.maxY - b.minY + 500);
 
   // track surface (outer minus inner via even-odd fill)
   ctx.fillStyle = "#3a3f4b";
   ctx.beginPath();
-  roundedRectPath(ctx, track.outer);
-  roundedRectPath(ctx, track.inner);
+  polygonPath(ctx, track.outer);
+  polygonPath(ctx, track.inner);
   ctx.fill("evenodd");
 
   // kerbs
@@ -46,41 +34,72 @@ export function drawTrack(ctx: CanvasRenderingContext2D, track: TrackDef) {
   ctx.strokeStyle = "#e11d2e";
   ctx.setLineDash([26, 26]);
   ctx.beginPath();
-  roundedRectPath(ctx, track.outer);
+  polygonPath(ctx, track.outer);
   ctx.stroke();
   ctx.beginPath();
-  roundedRectPath(ctx, track.inner);
+  polygonPath(ctx, track.inner);
   ctx.stroke();
   ctx.setLineDash([]);
 
   // infield
   ctx.fillStyle = "#2f8f52";
   ctx.beginPath();
-  roundedRectPath(ctx, track.inner);
+  polygonPath(ctx, track.inner);
   ctx.fill();
 
-  // start/finish line
   drawStartLine(ctx, track);
+  drawBoostPads(ctx, track);
   ctx.restore();
 }
 
 function drawStartLine(ctx: CanvasRenderingContext2D, track: TrackDef) {
-  const mid = {
-    hw: (track.outer.hw + track.inner.hw) / 2,
-    hh: (track.outer.hh + track.inner.hh) / 2,
-  };
-  const x = track.centerX + Math.cos(track.startAngle) * mid.hw;
-  const y = track.centerY + Math.sin(track.startAngle) * mid.hh;
-  const halfLen = (track.outer.hw - track.inner.hw) / 2 + 20;
+  const outerP = track.outer[0];
+  const innerP = track.inner[0];
+  const dx = outerP.x - innerP.x;
+  const dy = outerP.y - innerP.y;
+  const halfWidth = Math.hypot(dx, dy) / 2;
+  const angle = Math.atan2(dy, dx);
+  const midx = (outerP.x + innerP.x) / 2;
+  const midy = (outerP.y + innerP.y) / 2;
+
   ctx.save();
-  ctx.translate(x, y);
+  ctx.translate(midx, midy);
+  ctx.rotate(angle);
   const squares = 8;
-  const segLen = (halfLen * 2) / squares;
+  const thickness = 22;
+  const segLen = (halfWidth * 2) / squares;
   for (let i = 0; i < squares; i++) {
     ctx.fillStyle = i % 2 === 0 ? "#fff" : "#111";
-    ctx.fillRect(-14, -halfLen + i * segLen, 28, segLen);
+    ctx.fillRect(-halfWidth + i * segLen, -thickness / 2, segLen, thickness);
   }
   ctx.restore();
+}
+
+function drawBoostPads(ctx: CanvasRenderingContext2D, track: TrackDef) {
+  const pulse = 0.75 + 0.25 * Math.sin(performance.now() / 180);
+  for (const pad of track.boostPads) {
+    ctx.save();
+    ctx.translate(pad.x, pad.y);
+    ctx.globalAlpha = pulse;
+    ctx.fillStyle = "#facc15";
+    ctx.shadowColor = "#fde047";
+    ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.arc(0, 0, pad.radius * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#78350f";
+    for (const off of [-14, 0, 14]) {
+      ctx.beginPath();
+      ctx.moveTo(off - 8, -14);
+      ctx.lineTo(off + 8, 0);
+      ctx.lineTo(off - 8, 14);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
 }
 
 export function drawCar(ctx: CanvasRenderingContext2D, rc: RenderCar) {
@@ -91,6 +110,20 @@ export function drawCar(ctx: CanvasRenderingContext2D, rc: RenderCar) {
 
   const len = 34;
   const wid = 18;
+
+  if (rc.boosting) {
+    ctx.save();
+    const flicker = 0.6 + 0.4 * Math.sin(performance.now() / 40);
+    ctx.globalAlpha = flicker;
+    ctx.fillStyle = "#7dd3fc";
+    ctx.beginPath();
+    ctx.moveTo(-len / 2, -wid * 0.3);
+    ctx.lineTo(-len / 2 - 24, 0);
+    ctx.lineTo(-len / 2, wid * 0.3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
 
   ctx.shadowColor = "rgba(0,0,0,0.35)";
   ctx.shadowBlur = 6;
@@ -109,8 +142,8 @@ export function drawCar(ctx: CanvasRenderingContext2D, rc: RenderCar) {
   roundRect(ctx, -len / 2, -wid / 2, len, wid, 6);
   ctx.fillStyle = color;
   ctx.fill();
-  ctx.strokeStyle = "rgba(0,0,0,0.4)";
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = rc.boosting ? "#7dd3fc" : "rgba(0,0,0,0.4)";
+  ctx.lineWidth = rc.boosting ? 2.5 : 1.5;
   ctx.stroke();
 
   ctx.shadowColor = "transparent";
@@ -157,7 +190,8 @@ export function drawMinimap(
 ) {
   const size = 140;
   const pad = 14;
-  const scale = Math.min(size / (track.outer.hw * 2 + 80), size / (track.outer.hh * 2 + 80));
+  const b = track.bounds;
+  const scale = Math.min(size / (b.maxX - b.minX + 80), size / (b.maxY - b.minY + 80));
   const x0 = canvasWidth - size - pad;
   const y0 = pad;
 
@@ -177,8 +211,8 @@ export function drawMinimap(
 
   ctx.fillStyle = "#3a3f4b";
   ctx.beginPath();
-  roundedRectPath(ctx, track.outer);
-  roundedRectPath(ctx, track.inner);
+  polygonPath(ctx, track.outer);
+  polygonPath(ctx, track.inner);
   ctx.fill("evenodd");
   ctx.restore();
 

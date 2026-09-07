@@ -51,15 +51,16 @@ export class InputManager {
     gas: TouchButton;
     brake: TouchButton;
   };
-  private container: HTMLDivElement;
+  /** Touch control buttons, not attached to the DOM yet — the caller decides where/when. */
+  readonly element: HTMLDivElement;
   enabled = true;
 
-  constructor(mount: HTMLElement) {
+  constructor() {
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
 
-    this.container = document.createElement("div");
-    this.container.className = "touch-controls";
+    this.element = document.createElement("div");
+    this.element.className = "touch-controls";
 
     const steerWrap = document.createElement("div");
     steerWrap.className = "touch-group touch-group--left";
@@ -75,14 +76,13 @@ export class InputManager {
     pedalWrap.appendChild(brake.el);
     pedalWrap.appendChild(gas.el);
 
-    this.container.appendChild(steerWrap);
-    this.container.appendChild(pedalWrap);
-    mount.appendChild(this.container);
+    this.element.appendChild(steerWrap);
+    this.element.appendChild(pedalWrap);
 
     this.touch = { left, right, gas, brake };
 
     if (!isTouchDevice()) {
-      this.container.style.display = "none";
+      this.element.style.display = "none";
     }
   }
 
@@ -112,7 +112,7 @@ export class InputManager {
   destroy() {
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
-    this.container.remove();
+    this.element.remove();
   }
 }
 

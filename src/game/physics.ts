@@ -25,6 +25,11 @@ export const DEFAULT_TUNING: CarTuning = {
   radius: 16,
 };
 
+export const BOOST_DURATION = 2.5; // seconds
+export const BOOST_COOLDOWN = 4; // seconds before a pad can retrigger on the same car
+const BOOST_SPEED_MULT = 1.55;
+const BOOST_ACCEL_MULT = 1.8;
+
 export class Car {
   x: number;
   y: number;
@@ -38,6 +43,10 @@ export class Car {
   finished = false;
   raceTimeMs = 0;
   tuning: CarTuning;
+
+  topSpeed = 0;
+  boostTimer = 0;
+  boostCooldown = 0;
 
   constructor(x: number, y: number, angle: number, tuning: CarTuning = DEFAULT_TUNING) {
     this.x = x;
@@ -57,10 +66,33 @@ export class Car {
     this.nextCheckpoint = 0;
     this.finished = false;
     this.raceTimeMs = 0;
+    this.topSpeed = 0;
+    this.boostTimer = 0;
+    this.boostCooldown = 0;
+  }
+
+  /** Grants a temporary speed/acceleration boost; safe to call repeatedly (cooldown-gated by the caller). */
+  applyBoost() {
+    this.boostTimer = BOOST_DURATION;
+    this.boostCooldown = BOOST_COOLDOWN;
+  }
+
+  get boosting() {
+    return this.boostTimer > 0;
   }
 
   step(dt: number, input: CarInput) {
-    const t = this.tuning;
+    if (this.boostTimer > 0) this.boostTimer = Math.max(0, this.boostTimer - dt);
+    if (this.boostCooldown > 0) this.boostCooldown = Math.max(0, this.boostCooldown - dt);
+
+    const boosted = this.boosting;
+    const t: CarTuning = boosted
+      ? {
+          ...this.tuning,
+          maxSpeed: this.tuning.maxSpeed * BOOST_SPEED_MULT,
+          acceleration: this.tuning.acceleration * BOOST_ACCEL_MULT,
+        }
+      : this.tuning;
     const fx = Math.cos(this.angle);
     const fy = Math.sin(this.angle);
 
@@ -108,6 +140,7 @@ export class Car {
     this.x += this.vx * dt;
     this.y += this.vy * dt;
 
+    this.topSpeed = Math.max(this.topSpeed, Math.abs(this.speed));
     if (!this.finished) this.raceTimeMs += dt * 1000;
   }
 }

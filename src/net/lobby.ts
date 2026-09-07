@@ -7,23 +7,33 @@ import {
 import type { PeerLink } from "./webrtc";
 import { PLAYER_COLORS, randomPlayerId } from "./protocol";
 import type { NetMessage, PlayerInfo } from "./protocol";
+import { randomRoomCode, relayDelete, relayGet, relayPut, sleep } from "./relay";
 
-export interface QRPayload {
+interface QRPayload {
   k: "offer" | "answer";
   sdp: RTCSessionDescriptionInit;
 }
 
-export function encodePayload(p: QRPayload): string {
+function encodePayload(p: QRPayload): string {
   return JSON.stringify(p);
 }
 
-export function decodePayload(raw: string): QRPayload {
+function decodePayload(raw: string): QRPayload {
   const parsed = JSON.parse(raw);
   if (parsed.k !== "offer" && parsed.k !== "answer") throw new Error("Not a Toy Racers pairing code");
   return parsed as QRPayload;
 }
 
 type Listener<T> = (arg: T) => void;
+
+const POLL_INTERVAL_MS = 1500;
+const WAIT_TIMEOUT_MS = 5 * 60 * 1000;
+
+export interface PendingInvite {
+  code: string;
+  waitForGuest: Promise<PlayerInfo>;
+  cancel: () => void;
+}
 
 /** Runs on the device that starts the race; relays state between all guests. */
 export class HostLobby {
@@ -47,22 +57,52 @@ export class HostLobby {
     this.messageListeners.push(fn);
   }
 
-  /** Step 1: host generates an offer + QR payload for the next friend to scan. */
-  async createInvite() {
-    const { pc, control, state, offer } = await createHostOffer();
-    const payload = encodePayload({ k: "offer", sdp: offer });
-    return { pc, control, state, payload };
+  /**
+   * Generates a fresh invite (a short room code, backed by a relay so the
+   * QR only needs to encode the code itself) and waits for a guest to
+   * connect. Resolves once that guest's data channel is open and roster'd.
+   */
+  createInvite(): PendingInvite {
+    const code = randomRoomCode();
+    let cancelled = false;
+
+    const waitForGuest = (async () => {
+      const { pc, control, state, offer } = await createHostOffer();
+      await relayPut(`offer-${code}`, encodePayload({ k: "offer", sdp: offer }));
+
+      const deadline = Date.now() + WAIT_TIMEOUT_MS;
+      while (!cancelled) {
+        if (Date.now() > deadline) throw new Error("No one joined in time. Try generating a new code.");
+        await sleep(POLL_INTERVAL_MS);
+        if (cancelled) break;
+        const answerText = await relayGet(`answer-${code}`);
+        if (answerText) {
+          relayDelete(`offer-${code}`);
+          relayDelete(`answer-${code}`);
+          return this.acceptAnswer(pc, control, state, answerText);
+        }
+      }
+      pc.close();
+      throw new Error("Cancelled");
+    })();
+
+    return {
+      code,
+      waitForGuest,
+      cancel: () => {
+        cancelled = true;
+      },
+    };
   }
 
-  /** Step 2: host scans the friend's answer QR to finish pairing them in. */
-  async acceptAnswer(
+  private async acceptAnswer(
     pc: RTCPeerConnection,
     control: RTCDataChannel,
     state: RTCDataChannel,
     answerPayload: string,
   ): Promise<PlayerInfo> {
     const parsed = decodePayload(answerPayload);
-    if (parsed.k !== "answer") throw new Error("That code is an invite, not an answer. Ask your friend to scan first.");
+    if (parsed.k !== "answer") throw new Error("That code is an invite, not an answer.");
     const link = await completeHostConnection(pc, control, state, parsed.sdp);
 
     let resolvedId = randomPlayerId();
@@ -147,20 +187,21 @@ export class GuestLobby {
     this.messageListeners.push(fn);
   }
 
-  /** Step 1: scan the host's offer QR, produce an answer payload to show back. */
-  async createAnswer(offerPayload: string) {
-    const parsed = decodePayload(offerPayload);
-    if (parsed.k !== "offer") throw new Error("That code is an answer, not an invite. Ask your friend to show their invite QR.");
+  /** Looks up the host's offer by room code, answers it, and connects. */
+  async connectWithCode(code: string): Promise<void> {
+    const offerText = await relayGet(`offer-${code}`);
+    if (!offerText) throw new Error("No race found with that code. Double-check the digits with your host.");
+    const parsed = decodePayload(offerText);
+    if (parsed.k !== "offer") throw new Error("That code isn't a valid invite.");
+
     const created = await createGuestAnswer(parsed.sdp);
-    const payload = encodePayload({ k: "answer", sdp: created.answer });
+    const answerPayload = encodePayload({ k: "answer", sdp: created.answer });
+    await relayPut(`answer-${code}`, answerPayload);
 
-    completeGuestConnection(created).then((link) => {
-      this.link = link;
-      link.onMessage((msg) => this.handleMessage(msg));
-      link.send({ type: "hello", player: this.localPlayer });
-    });
-
-    return payload;
+    const link = await completeGuestConnection(created);
+    this.link = link;
+    link.onMessage((msg) => this.handleMessage(msg));
+    link.send({ type: "hello", player: this.localPlayer });
   }
 
   private handleMessage(msg: NetMessage) {

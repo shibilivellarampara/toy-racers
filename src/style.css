@@ -188,15 +188,39 @@ body {
   font-size: 14px;
 }
 
-.qr-box {
+.invite-box {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
 }
-.qr-box canvas {
+.invite-box canvas {
   border-radius: 12px;
   max-width: 100%;
+}
+
+.room-code {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+  background: #0c0e1e;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 6px 22px;
+}
+
+.code-input {
+  background: #0c0e1e;
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .scan-overlay {
@@ -235,6 +259,64 @@ body {
   border-radius: 10px;
   font-weight: 600;
   font-size: 15px;
+}
+.hud-timer {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 12, 24, 0.6);
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.hud-speed {
+  position: absolute;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 12, 24, 0.55);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.hud-standings {
+  position: absolute;
+  top: calc(max(14px, env(safe-area-inset-top)) + 46px);
+  left: 16px;
+  background: rgba(10, 12, 24, 0.55);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  min-width: 110px;
+}
+.standing-row {
+  padding: 2px 0;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.standing-row--you {
+  color: #fde68a;
+  font-weight: 700;
+}
+.hud-boost-flash {
+  position: absolute;
+  top: 20%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 32px;
+  font-weight: 800;
+  color: #facc15;
+  text-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.hud-boost-flash.visible {
+  opacity: 1;
 }
 .hud-countdown {
   position: absolute;
@@ -333,23 +415,24 @@ body {
   color: var(--muted);
 }
 
-/* ------------------------------------------------------------ Rotate hint */
-
-.rotate-hint {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  background: rgba(5, 6, 15, 0.92);
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 30px;
-  font-size: 18px;
-}
+/* --------------------------------------------------------- Portrait mode */
 
 @media (orientation: portrait) {
-  body.racing .rotate-hint {
-    display: flex;
+  .hud-standings {
+    font-size: 10px;
+    min-width: 90px;
+    top: calc(max(14px, env(safe-area-inset-top)) + 40px);
+  }
+  .hud-timer {
+    font-size: 13px;
+    padding: 6px 10px;
+  }
+  .touch-gas {
+    width: 76px;
+    height: 76px;
+  }
+  .touch-steer {
+    width: 58px;
+    height: 58px;
   }
 }

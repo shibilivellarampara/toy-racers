@@ -10,6 +10,7 @@ export interface RemoteCarView {
   targetX: number;
   targetY: number;
   targetAngle: number;
+  boosting: boolean;
 }
 
 export interface RaceResult {
@@ -17,6 +18,13 @@ export interface RaceResult {
   name: string;
   place: number;
   timeMs: number;
+}
+
+export interface StandingEntry {
+  id: string;
+  name: string;
+  place: number;
+  isLocal: boolean;
 }
 
 const COUNTDOWN_MS = 3000;
@@ -68,7 +76,14 @@ export class RaceSession {
     if (this.remotes.has(info.id)) return;
     const start = startPosition(this.track, info.slot, Math.max(this.roster.length, 1));
     const car = new Car(start.x, start.y, start.angle, { ...DEFAULT_TUNING });
-    this.remotes.set(info.id, { info, car, targetX: start.x, targetY: start.y, targetAngle: start.angle });
+    this.remotes.set(info.id, {
+      info,
+      car,
+      targetX: start.x,
+      targetY: start.y,
+      targetAngle: start.angle,
+      boosting: false,
+    });
   }
 
   removeRemote(id: string) {
@@ -97,6 +112,7 @@ export class RaceSession {
         remote.targetAngle = msg.angle;
         remote.car.lap = msg.lap;
         remote.car.nextCheckpoint = msg.cp;
+        remote.boosting = msg.boost;
         if (msg.fin && this.isHost) this.checkFinish(msg.id, remote.car.raceTimeMs);
         remote.car.finished = msg.fin;
         return;
@@ -145,6 +161,14 @@ export class RaceSession {
       const input = this.input.getInput();
       this.localCar.step(dt, input);
       resolveTrackCollision(this.localCar, this.track);
+      if (this.localCar.boostCooldown <= 0) {
+        for (const pad of this.track.boostPads) {
+          if (Math.hypot(this.localCar.x - pad.x, this.localCar.y - pad.y) <= pad.radius) {
+            this.localCar.applyBoost();
+            break;
+          }
+        }
+      }
       const completedNow = updateLapProgress(this.localCar, this.track);
       if (completedNow) {
         if (this.isHost) {
@@ -159,6 +183,7 @@ export class RaceSession {
             lap: this.localCar.lap,
             cp: this.localCar.nextCheckpoint,
             fin: true,
+            boost: this.localCar.boosting,
           });
         }
       }
@@ -184,8 +209,29 @@ export class RaceSession {
         lap: this.localCar.lap,
         cp: this.localCar.nextCheckpoint,
         fin: this.localCar.finished,
+        boost: this.localCar.boosting,
       });
     }
+  }
+
+  getStandings(): StandingEntry[] {
+    const cp = this.track.checkpointCount;
+    const entries = [
+      {
+        id: this.localInfo.id,
+        name: this.localInfo.name,
+        progress: this.localCar.lap * cp + this.localCar.nextCheckpoint,
+        isLocal: true,
+      },
+      ...[...this.remotes.values()].map((r) => ({
+        id: r.info.id,
+        name: r.info.name,
+        progress: r.car.lap * cp + r.car.nextCheckpoint,
+        isLocal: false,
+      })),
+    ];
+    entries.sort((a, b) => b.progress - a.progress);
+    return entries.map((e, i) => ({ id: e.id, name: e.name, place: i + 1, isLocal: e.isLocal }));
   }
 }
 
