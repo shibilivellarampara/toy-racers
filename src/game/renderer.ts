@@ -21,6 +21,7 @@ export function drawTrack(ctx: CanvasRenderingContext2D, track: TrackDef) {
   const b = track.bounds;
   ctx.fillStyle = "#1c6b3c";
   ctx.fillRect(b.minX - 250, b.minY - 250, b.maxX - b.minX + 500, b.maxY - b.minY + 500);
+  drawGrassPatches(ctx, track);
 
   // track surface (outer minus inner via even-odd fill)
   ctx.fillStyle = "#3a3f4b";
@@ -49,7 +50,77 @@ export function drawTrack(ctx: CanvasRenderingContext2D, track: TrackDef) {
 
   drawStartLine(ctx, track);
   drawBoostPads(ctx, track);
+  drawScenery(ctx, track);
   ctx.restore();
+}
+
+function drawGrassPatches(ctx: CanvasRenderingContext2D, track: TrackDef) {
+  for (const p of track.grassPatches) {
+    const shade = p.shade >= 0 ? `rgba(255,255,255,${p.shade * 0.06})` : `rgba(0,0,0,${-p.shade * 0.08})`;
+    ctx.fillStyle = shade;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, p.r, p.r * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawScenery(ctx: CanvasRenderingContext2D, track: TrackDef) {
+  for (const item of track.scenery) {
+    ctx.save();
+    ctx.translate(item.x, item.y);
+    ctx.scale(item.scale, item.scale);
+    ctx.rotate(item.rotation);
+
+    ctx.fillStyle = "rgba(0,0,0,0.15)";
+    ctx.beginPath();
+    ctx.ellipse(0, 4, item.type === "tree" ? 13 : 9, item.type === "tree" ? 5 : 3.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (item.type === "tree") {
+      ctx.fillStyle = "#6b4423";
+      ctx.fillRect(-3, -4, 6, 14);
+      ctx.fillStyle = "#2e8b4f";
+      ctx.beginPath();
+      ctx.arc(-6, -14, 10, 0, Math.PI * 2);
+      ctx.arc(6, -14, 10, 0, Math.PI * 2);
+      ctx.arc(0, -21, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.15)";
+      ctx.beginPath();
+      ctx.arc(-3, -23, 6, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (item.type === "bush") {
+      ctx.fillStyle = "#3a9c5f";
+      ctx.beginPath();
+      ctx.arc(-5, 0, 7, 0, Math.PI * 2);
+      ctx.arc(5, 0, 7, 0, Math.PI * 2);
+      ctx.arc(0, -4, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.beginPath();
+      ctx.arc(-2, -6, 4, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = "#8b8f9a";
+      ctx.beginPath();
+      ctx.moveTo(-8, 2);
+      ctx.lineTo(-5, -6);
+      ctx.lineTo(3, -7);
+      ctx.lineTo(8, 0);
+      ctx.lineTo(4, 4);
+      ctx.lineTo(-3, 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.25)";
+      ctx.beginPath();
+      ctx.moveTo(-5, -6);
+      ctx.lineTo(3, -7);
+      ctx.lineTo(0, -2);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
 }
 
 function drawStartLine(ctx: CanvasRenderingContext2D, track: TrackDef) {
@@ -129,14 +200,25 @@ export function drawCar(ctx: CanvasRenderingContext2D, rc: RenderCar) {
   ctx.shadowBlur = 6;
   ctx.shadowOffsetY = 3;
 
-  // wheels
-  ctx.fillStyle = "#111318";
+  // wheels, with a small hub highlight so they don't read as flat blobs
   const wheelW = 6;
   const wheelH = 10;
-  ctx.fillRect(len * 0.18, -wid / 2 - 1, wheelH, wheelW);
-  ctx.fillRect(len * 0.18, wid / 2 - wheelW + 1, wheelH, wheelW);
-  ctx.fillRect(-len * 0.32, -wid / 2 - 1, wheelH, wheelW);
-  ctx.fillRect(-len * 0.32, wid / 2 - wheelW + 1, wheelH, wheelW);
+  const wheelXs = [len * 0.18, -len * 0.32];
+  const wheelYs = [-wid / 2 - 1, wid / 2 - wheelW + 1];
+  for (const wx of wheelXs) {
+    for (const wy of wheelYs) {
+      ctx.fillStyle = "#111318";
+      ctx.fillRect(wx, wy, wheelH, wheelW);
+      ctx.fillStyle = "#3a3f4b";
+      ctx.fillRect(wx + wheelH / 2 - 1, wy + 1, 2, wheelW - 2);
+    }
+  }
+
+  // rear spoiler
+  ctx.fillStyle = "#111318";
+  ctx.fillRect(-len / 2 - 3, -wid * 0.42, 3, wid * 0.84);
+  ctx.fillRect(-len / 2 - 3, -wid * 0.42, 6, 2.5);
+  ctx.fillRect(-len / 2 - 3, wid * 0.42 - 2.5, 6, 2.5);
 
   // body
   roundRect(ctx, -len / 2, -wid / 2, len, wid, 8);
@@ -148,14 +230,40 @@ export function drawCar(ctx: CanvasRenderingContext2D, rc: RenderCar) {
 
   ctx.shadowColor = "transparent";
 
+  // glossy highlight along the top edge, like a toy car's molded plastic sheen
+  ctx.save();
+  roundRect(ctx, -len / 2, -wid / 2, len, wid, 8);
+  ctx.clip();
+  ctx.fillStyle = "rgba(255,255,255,0.28)";
+  ctx.beginPath();
+  ctx.ellipse(-len * 0.05, -wid * 0.32, len * 0.55, wid * 0.28, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // racing stripe down the centerline
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.fillRect(-len * 0.42, -wid * 0.09, len * 0.84, wid * 0.18);
+
+  // side mirrors
+  ctx.fillStyle = "#111318";
+  ctx.fillRect(len * 0.16, -wid / 2 - 3, 4, 3);
+  ctx.fillRect(len * 0.16, wid / 2, 4, 3);
+
   // cabin / windshield
   roundRect(ctx, -len * 0.06, -wid * 0.32, len * 0.4, wid * 0.64, 5);
   ctx.fillStyle = "#12172a";
   ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
-  // nose stripe
-  ctx.fillStyle = "rgba(255,255,255,0.85)";
-  ctx.fillRect(len / 2 - 4, -2.5, 4, 5);
+  // headlights and taillights
+  ctx.fillStyle = "#fef9c3";
+  ctx.fillRect(len / 2 - 3, -wid * 0.36, 3, wid * 0.22);
+  ctx.fillRect(len / 2 - 3, wid * 0.14, 3, wid * 0.22);
+  ctx.fillStyle = "#ef4444";
+  ctx.fillRect(-len / 2, -wid * 0.32, 2.5, wid * 0.2);
+  ctx.fillRect(-len / 2, wid * 0.12, 2.5, wid * 0.2);
 
   ctx.restore();
 

@@ -1,12 +1,13 @@
 :root {
-  --bg: #0f1226;
-  --panel: #171b34;
-  --panel-border: #2a2f52;
-  --text: #f4f5fb;
-  --muted: #9aa0c3;
+  --bg: #f3f4f8;
+  --panel: #ffffff;
+  --panel-border: #e2e4ee;
+  --text: #1a1d2e;
+  --muted: #6b7089;
   --accent: #ef4444;
   --accent-2: #3b82f6;
-  color-scheme: dark;
+  --field-bg: #f1f2f8;
+  color-scheme: light;
 }
 
 * {
@@ -81,6 +82,14 @@ body {
   text-align: center;
 }
 
+.credit-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+  opacity: 0.7;
+}
+
 .subtitle,
 .hint {
   margin: 0;
@@ -101,7 +110,7 @@ body {
 }
 
 .name-input {
-  background: #0c0e1e;
+  background: var(--field-bg);
   border: 1px solid var(--panel-border);
   color: var(--text);
   border-radius: 14px;
@@ -124,7 +133,7 @@ body {
   cursor: pointer;
 }
 .swatch.selected {
-  border-color: #fff;
+  border-color: var(--text);
   transform: scale(1.1);
 }
 
@@ -141,7 +150,7 @@ body {
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
-  color: var(--text);
+  color: #fff;
 }
 .btn:disabled {
   opacity: 0.5;
@@ -178,7 +187,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #0c0e1e;
+  background: var(--field-bg);
   border-radius: 14px;
   padding: 8px 12px;
 }
@@ -208,14 +217,14 @@ body {
   font-weight: 800;
   letter-spacing: 0.12em;
   font-variant-numeric: tabular-nums;
-  background: #0c0e1e;
+  background: var(--field-bg);
   border: 1px solid var(--panel-border);
   border-radius: 16px;
   padding: 6px 22px;
 }
 
 .code-input {
-  background: #0c0e1e;
+  background: var(--field-bg);
   border: 1px solid var(--panel-border);
   color: var(--text);
   border-radius: 14px;
@@ -235,7 +244,7 @@ body {
 }
 .map-option {
   border: 1px solid var(--panel-border);
-  background: #0c0e1e;
+  background: var(--field-bg);
   color: var(--muted);
   border-radius: 14px;
   padding: 8px 14px;
@@ -288,6 +297,9 @@ body {
   position: fixed;
   inset: 0;
   pointer-events: none;
+  /* HUD chips overlay the game canvas, not a card, so they always need
+     light text regardless of the app's light/dark UI theme. */
+  color: #fff;
 }
 .hud-lap {
   position: absolute;
@@ -320,7 +332,7 @@ body {
   padding: 6px 12px;
   border-radius: 12px;
   font-size: 12px;
-  color: var(--muted);
+  color: rgba(255, 255, 255, 0.8);
   font-variant-numeric: tabular-nums;
 }
 .hud-standings {
@@ -335,7 +347,7 @@ body {
 }
 .standing-row {
   padding: 2px 0;
-  color: var(--muted);
+  color: rgba(255, 255, 255, 0.8);
   white-space: nowrap;
 }
 .standing-row--you {
@@ -363,7 +375,7 @@ body {
   top: max(14px, env(safe-area-inset-top));
   right: 16px;
   background: rgba(10, 12, 24, 0.6);
-  color: var(--text);
+  color: #fff;
   border: none;
   padding: 8px 14px;
   border-radius: 14px;
@@ -477,7 +489,7 @@ body {
   grid-template-columns: 40px 1fr auto;
   gap: 10px;
   align-items: center;
-  background: #0c0e1e;
+  background: var(--field-bg);
   border-radius: 14px;
   padding: 10px 12px;
 }
@@ -494,7 +506,7 @@ body {
   text-align: center;
   font-size: 16px;
   font-weight: 700;
-  color: #fde68a;
+  color: #b45309;
 }
 
 /* --------------------------------------------------------- Portrait mode */

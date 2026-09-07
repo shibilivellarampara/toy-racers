@@ -11,6 +11,21 @@ export interface BoostPad {
   radius: number;
 }
 
+export interface SceneryItem {
+  x: number;
+  y: number;
+  type: "tree" | "bush" | "rock";
+  scale: number;
+  rotation: number;
+}
+
+export interface GrassPatch {
+  x: number;
+  y: number;
+  r: number;
+  shade: number; // -1..1, darker/lighter than the base grass color
+}
+
 export interface TrackDef {
   outer: Point[];
   inner: Point[];
@@ -21,6 +36,8 @@ export interface TrackDef {
   centerX: number;
   centerY: number;
   boostPads: BoostPad[];
+  scenery: SceneryItem[];
+  grassPatches: GrassPatch[];
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
@@ -155,6 +172,8 @@ function buildTrackFromCenterline(centerlineTriples: Centerline, boostProgress: 
   );
 
   const boostPads: BoostPad[] = boostProgress.map((p) => pointAtProgress(centerline, cumLen, totalLen, p, 60));
+  const scenery = generateScenery(outer, inner, bounds);
+  const grassPatches = generateGrassPatches(bounds);
 
   return {
     outer,
@@ -166,8 +185,55 @@ function buildTrackFromCenterline(centerlineTriples: Centerline, boostProgress: 
     centerX,
     centerY,
     boostPads,
+    scenery,
+    grassPatches,
     bounds,
   };
+}
+
+type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
+
+function generateScenery(outer: Point[], inner: Point[], bounds: Bounds): SceneryItem[] {
+  const items: SceneryItem[] = [];
+  const types: SceneryItem["type"][] = ["tree", "bush", "rock"];
+  const randomItem = (x: number, y: number): SceneryItem => ({
+    x,
+    y,
+    type: types[Math.floor(Math.random() * types.length)],
+    scale: 0.7 + Math.random() * 0.9,
+    rotation: Math.random() * Math.PI * 2,
+  });
+
+  // Outside the track, in the surrounding grass.
+  for (let i = 0; i < 140; i++) {
+    const x = bounds.minX - 200 + Math.random() * (bounds.maxX - bounds.minX + 400);
+    const y = bounds.minY - 200 + Math.random() * (bounds.maxY - bounds.minY + 400);
+    const d = polygonSDF(x, y, outer);
+    if (d > 45 && d < 380) items.push(randomItem(x, y));
+  }
+
+  // In the infield, inside the inner hole.
+  for (let i = 0; i < 50; i++) {
+    const x = bounds.minX + Math.random() * (bounds.maxX - bounds.minX);
+    const y = bounds.minY + Math.random() * (bounds.maxY - bounds.minY);
+    const d = polygonSDF(x, y, inner);
+    if (d < -45) items.push(randomItem(x, y));
+  }
+
+  return items;
+}
+
+function generateGrassPatches(bounds: Bounds): GrassPatch[] {
+  const patches: GrassPatch[] = [];
+  for (let i = 0; i < 26; i++) {
+    patches.push({
+      x: bounds.minX - 220 + Math.random() * (bounds.maxX - bounds.minX + 440),
+      y: bounds.minY - 220 + Math.random() * (bounds.maxY - bounds.minY + 440),
+      r: 90 + Math.random() * 160,
+      shade: Math.random() * 2 - 1,
+    });
+  }
+  return patches;
 }
 
 function pointAtProgress(

@@ -221,6 +221,7 @@ export class App {
         "hint",
         "Bluetooth can't run inside an installed web app on iPhone, so nearby multiplayer works over a shared Wi-Fi/hotspot instead — the host shares a 4-digit code (or QR), everyone else enters it with Join.",
       ),
+      h("p", "credit-line", "Developed by Shibil"),
     );
     this.setScreen(screen);
   }
@@ -615,6 +616,7 @@ export class App {
 
   private showResults(race: RaceSession) {
     this.loop?.stop();
+    sound.stopEngine();
     this.canvas.classList.remove("visible");
     document.body.classList.remove("racing");
 
