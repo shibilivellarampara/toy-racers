@@ -284,13 +284,31 @@ export function resolveTrackCollision(car: Car, track: TrackDef) {
   }
 }
 
-/** Returns this car's fractional progress (0..1) around the centerline. */
-function trackProgress(track: TrackDef, x: number, y: number): number {
+const SEGMENT_LOOKBEHIND = 2;
+const SEGMENT_LOOKAHEAD = 2;
+
+/**
+ * Returns this car's fractional progress (0..1) around the centerline,
+ * searching only a small window of segments near `hint` (the car's last
+ * known segment) rather than the whole track. A global nearest-point
+ * search can jump to a spatially-close-but-arc-length-far segment on
+ * hairpins/chicanes where the track passes near itself, which caused laps
+ * to complete early; a local window can't do that since neighboring
+ * segments are, by construction, actually adjacent on the track.
+ */
+function trackProgress(
+  track: TrackDef,
+  x: number,
+  y: number,
+  hint: number,
+): { progress: number; segmentIndex: number } {
   const { centerline, cumLen, totalLen } = track;
   const n = centerline.length;
   let best = Infinity;
   let bestProgress = 0;
-  for (let i = 0; i < n; i++) {
+  let bestIndex = hint;
+  for (let offset = -SEGMENT_LOOKBEHIND; offset <= SEGMENT_LOOKAHEAD; offset++) {
+    const i = (((hint + offset) % n) + n) % n;
     const a = centerline[i];
     const b = centerline[(i + 1) % n];
     const abx = b.x - a.x;
@@ -303,12 +321,13 @@ function trackProgress(track: TrackDef, x: number, y: number): number {
     const d = Math.hypot(x - cx, y - cy);
     if (d < best) {
       best = d;
+      bestIndex = i;
       const segStart = cumLen[i];
       const segEnd = i + 1 < n ? cumLen[i + 1] : totalLen;
       bestProgress = (segStart + (segEnd - segStart) * t) / totalLen;
     }
   }
-  return bestProgress;
+  return { progress: bestProgress, segmentIndex: bestIndex };
 }
 
 // Half the car sprite's length: check the front bumper, not the center, so
@@ -320,12 +339,18 @@ export function updateLapProgress(car: Car, track: TrackDef): boolean {
   if (car.finished) return false;
   const noseX = car.x + Math.cos(car.angle) * FRONT_OFFSET;
   const noseY = car.y + Math.sin(car.angle) * FRONT_OFFSET;
-  const progress = trackProgress(track, noseX, noseY);
+  const { progress, segmentIndex } = trackProgress(track, noseX, noseY, car.segmentHint);
+  car.segmentHint = segmentIndex;
   const idx = Math.floor(progress * track.checkpointCount) % track.checkpointCount;
 
   if (idx === car.nextCheckpoint) {
+    // Completing checkpoint 0 itself (not "checkpoint N-1 advancing to 0")
+    // is what finishes a lap — otherwise reaching the last checkpoint's
+    // zone (still ~1 checkpoint-width before the line) finished the lap
+    // early, which is also why the race used to end before the line.
+    const completingLap = car.nextCheckpoint === 0;
     car.nextCheckpoint = (car.nextCheckpoint + 1) % track.checkpointCount;
-    if (car.nextCheckpoint === 0) {
+    if (completingLap) {
       car.lap += 1;
       if (car.lap >= LAPS_TO_WIN) {
         car.finished = true;

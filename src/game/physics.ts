@@ -39,10 +39,20 @@ export class Car {
   speed = 0; // signed scalar along heading, derived each step
 
   lap = 0;
-  nextCheckpoint = 0;
+  // Starts at 1, not 0: the car is already sitting on checkpoint 0 (the
+  // start/finish line) at spawn, so checkpoint 0 must not count as
+  // "reached" until the car comes back around to it after checkpoint
+  // (checkpointCount - 1) — otherwise every lap (including the race
+  // finish) completes one checkpoint-width early.
+  nextCheckpoint = 1;
   finished = false;
   raceTimeMs = 0;
   tuning: CarTuning;
+  /** Last centerline segment index this car was progressing through; keeps
+   * lap-progress tracking local instead of a global nearest-point search
+   * (which can misfire on hairpins/chicanes where two unrelated parts of
+   * the loop pass close to each other in space). */
+  segmentHint = 0;
 
   topSpeed = 0;
   boostTimer = 0;
@@ -63,12 +73,13 @@ export class Car {
     this.vy = 0;
     this.speed = 0;
     this.lap = 0;
-    this.nextCheckpoint = 0;
+    this.nextCheckpoint = 1;
     this.finished = false;
     this.raceTimeMs = 0;
     this.topSpeed = 0;
     this.boostTimer = 0;
     this.boostCooldown = 0;
+    this.segmentHint = 0;
   }
 
   /** Grants a temporary speed/acceleration boost; safe to call repeatedly (cooldown-gated by the caller). */
