@@ -24,12 +24,10 @@ export interface TrackDef {
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
-/**
- * Hand-authored circuit centerline: [x, y, width] triples going around the
- * loop in the direction of travel. Narrower widths mark the technical
- * (hairpin / chicane) sections; wider ones are the straights.
- */
-const CENTERLINE: [number, number, number][] = [
+type Centerline = [number, number, number][];
+
+/** Hand-authored circuit: a hairpin + a chicane between two long straights. */
+const GRAND_CIRCUIT: Centerline = [
   [2300, 1450, 300], // start/finish straight, right end
   [1200, 1500, 300], // bottom straight, left end
   [700, 1400, 260], // turn 1 entry (sweeper)
@@ -46,12 +44,73 @@ const CENTERLINE: [number, number, number][] = [
   [2350, 1150, 280], // continue right sweeper toward start
 ];
 
+/** Wide, fast, easy loop — good for a first race. */
+function makeSpeedwayOval(): Centerline {
+  const cx = 1400;
+  const cy = 900;
+  const rx = 1150;
+  const ry = 680;
+  const n = 20;
+  const pts: Centerline = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    pts.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry, 320]);
+  }
+  return pts;
+}
+const SPEEDWAY_OVAL = makeSpeedwayOval();
+
+/** Tight and technical: two hairpins plus a chicane, narrower throughout. */
+const TECHNICAL_TWISTER: Centerline = [
+  [2150, 1500, 260], // start/finish straight
+  [1300, 1520, 240], // bottom straight
+  [850, 1460, 200], // turn 1 entry
+  [600, 1250, 180], // hairpin 1 entry
+  [560, 1000, 140], // hairpin 1 apex (narrow)
+  [780, 880, 170], // hairpin 1 exit
+  [1050, 950, 200], // short link straight
+  [1150, 700, 180], // turn toward hairpin 2
+  [950, 480, 150], // hairpin 2 entry
+  [750, 400, 130], // hairpin 2 apex (narrow)
+  [850, 200, 160], // hairpin 2 exit
+  [1250, 160, 220], // top straight
+  [1750, 200, 200], // chicane entry
+  [1880, 380, 140], // chicane apex (narrow)
+  [1780, 560, 190], // chicane exit
+  [2100, 700, 230], // sweeper down the right side
+  [2350, 1050, 260], // continue right sweeper toward start
+];
+
+interface TrackOption {
+  id: string;
+  name: string;
+  centerline: Centerline;
+  boostProgress: number[];
+}
+
+export const TRACK_LIST: TrackOption[] = [
+  { id: "circuit", name: "Grand Circuit", centerline: GRAND_CIRCUIT, boostProgress: [0.04, 0.58, 0.86] },
+  { id: "oval", name: "Speedway Oval", centerline: SPEEDWAY_OVAL, boostProgress: [0.1, 0.4, 0.65, 0.9] },
+  {
+    id: "twister",
+    name: "Technical Twister",
+    centerline: TECHNICAL_TWISTER,
+    boostProgress: [0.03, 0.42, 0.72],
+  },
+];
+export const DEFAULT_TRACK_ID = TRACK_LIST[0].id;
+
+export function buildTrack(id: string): TrackDef {
+  const option = TRACK_LIST.find((t) => t.id === id) ?? TRACK_LIST[0];
+  return buildTrackFromCenterline(option.centerline, option.boostProgress);
+}
+
 const LAPS_TO_WIN = 3;
 const CHECKPOINT_COUNT = 24;
 
-export function makeCircuitTrack(): TrackDef {
-  const centerline = CENTERLINE.map(([x, y]) => ({ x, y }));
-  const widths = CENTERLINE.map(([, , w]) => w);
+function buildTrackFromCenterline(centerlineTriples: Centerline, boostProgress: number[]): TrackDef {
+  const centerline = centerlineTriples.map(([x, y]) => ({ x, y }));
+  const widths = centerlineTriples.map(([, , w]) => w);
   const n = centerline.length;
 
   const normals: Point[] = centerline.map((p, i) => {
@@ -95,11 +154,7 @@ export function makeCircuitTrack(): TrackDef {
     { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
   );
 
-  const boostPads: BoostPad[] = [
-    pointAtProgress(centerline, cumLen, totalLen, 0.04, 60),
-    pointAtProgress(centerline, cumLen, totalLen, 0.58, 60),
-    pointAtProgress(centerline, cumLen, totalLen, 0.86, 60),
-  ];
+  const boostPads: BoostPad[] = boostProgress.map((p) => pointAtProgress(centerline, cumLen, totalLen, p, 60));
 
   return {
     outer,
@@ -256,10 +311,16 @@ function trackProgress(track: TrackDef, x: number, y: number): number {
   return bestProgress;
 }
 
+// Half the car sprite's length: check the front bumper, not the center, so
+// laps/finish register exactly when the car visually reaches the line.
+const FRONT_OFFSET = 17;
+
 /** Advances lap/checkpoint progress; returns true if this step completed the race. */
 export function updateLapProgress(car: Car, track: TrackDef): boolean {
   if (car.finished) return false;
-  const progress = trackProgress(track, car.x, car.y);
+  const noseX = car.x + Math.cos(car.angle) * FRONT_OFFSET;
+  const noseY = car.y + Math.sin(car.angle) * FRONT_OFFSET;
+  const progress = trackProgress(track, noseX, noseY);
   const idx = Math.floor(progress * track.checkpointCount) % track.checkpointCount;
 
   if (idx === car.nextCheckpoint) {

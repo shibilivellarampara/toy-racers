@@ -1,11 +1,12 @@
 import { h, button } from "./dom";
-import { makeCircuitTrack, LAPS_TO_WIN } from "../game/track";
+import { buildTrack, DEFAULT_TRACK_ID, TRACK_LIST, LAPS_TO_WIN } from "../game/track";
 import type { TrackDef } from "../game/track";
 import { applyCamera, drawCar, drawMinimap, drawTrack } from "../game/renderer";
 import type { RenderCar } from "../game/renderer";
 import { InputManager } from "../game/input";
 import { GameLoop } from "../game/loop";
 import { RaceSession } from "../game/race";
+import { sound } from "../game/sound";
 import { PLAYER_COLORS, randomPlayerId } from "../net/protocol";
 import type { PlayerInfo } from "../net/protocol";
 import { HostLobby, GuestLobby } from "../net/lobby";
@@ -49,6 +50,7 @@ export class App {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private track: TrackDef;
+  private selectedMapId: string = DEFAULT_TRACK_ID;
 
   private input?: InputManager;
   private loop?: GameLoop;
@@ -57,14 +59,22 @@ export class App {
   private profile: Profile = loadProfile();
   private resultsShown = false;
 
+  private activeHostLobby?: HostLobby;
+  private activeGuestLobby?: GuestLobby;
+
+  private prevCountdownSecond = -1;
+  private prevLap = 0;
+
   constructor(mount: HTMLElement) {
     this.canvas = h("canvas", "game-canvas");
     this.uiRoot = h("div", "ui-root");
     mount.append(this.canvas, this.uiRoot);
     this.ctx = this.canvas.getContext("2d")!;
-    this.track = makeCircuitTrack();
+    this.track = buildTrack(this.selectedMapId);
 
     window.addEventListener("resize", this.resizeCanvas);
+    window.addEventListener("orientationchange", this.onOrientationChange);
+    window.visualViewport?.addEventListener("resize", this.resizeCanvas);
     this.resizeCanvas();
     this.showMenu();
   }
@@ -76,6 +86,14 @@ export class App {
     this.canvas.style.width = window.innerWidth + "px";
     this.canvas.style.height = window.innerHeight + "px";
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+
+  // iOS can report stale innerWidth/innerHeight for a beat right after
+  // rotation, so re-measure a couple of times after the event fires.
+  private onOrientationChange = () => {
+    this.resizeCanvas();
+    setTimeout(this.resizeCanvas, 60);
+    setTimeout(this.resizeCanvas, 250);
   };
 
   private setScreen(el: HTMLElement) {
@@ -101,6 +119,10 @@ export class App {
 
   private showMenu() {
     this.teardownRace();
+    this.activeHostLobby?.close();
+    this.activeHostLobby = undefined;
+    this.activeGuestLobby?.close();
+    this.activeGuestLobby = undefined;
     this.canvas.classList.remove("visible");
     document.body.classList.remove("racing");
 
@@ -137,7 +159,7 @@ export class App {
       h(
         "p",
         "subtitle",
-        "Top-down toy car racing. Play solo, or connect with friends on the same Wi-Fi — no internet or account needed.",
+        "Top-down toy car racing with friends. Connect over the same Wi-Fi — no internet or account needed.",
       ),
       h("label", "field-label", "Name", nameInput),
       h("label", "field-label", "Color", swatches),
@@ -146,7 +168,6 @@ export class App {
         "menu-actions",
         button("Host a Race", "btn btn-primary", () => this.showHostLobby()),
         button("Join a Race", "btn btn-secondary", () => this.showJoinLobby()),
-        button("Practice Solo", "btn btn-ghost", () => this.startPractice()),
       ),
       h(
         "p",
@@ -166,6 +187,7 @@ export class App {
   private showHostLobby() {
     const localInfo = this.localPlayerInfo(0);
     const hostLobby = new HostLobby(localInfo);
+    hostLobby.onMessage(({ msg }) => this.race?.handleNetMessage(msg));
 
     const rosterEl = h("div", "roster-list");
     const statusEl = h("p", "status-text", "");
@@ -219,10 +241,26 @@ export class App {
       this.beginHostRace(hostLobby);
     });
 
+    const mapEl = h("div", "map-list");
+    const renderMaps = () => {
+      mapEl.replaceChildren(
+        ...TRACK_LIST.map((m) => {
+          const b = button(m.name, `map-option${m.id === this.selectedMapId ? " selected" : ""}`, () => {
+            this.selectedMapId = m.id;
+            this.track = buildTrack(m.id);
+            renderMaps();
+          });
+          return b;
+        }),
+      );
+    };
+    renderMaps();
+
     const screen = h(
       "div",
       "screen lobby-screen",
       h("h2", "title", "Host a Race"),
+      h("div", "field-label", "Map", mapEl),
       statusEl,
       rosterEl,
       inviteBox,
@@ -242,10 +280,10 @@ export class App {
       true,
       (msg) => hostLobby.broadcast(msg),
     );
-    hostLobby.onMessage(({ msg }) => race.handleNetMessage(msg));
+    this.activeHostLobby = hostLobby;
     this.input = input;
     this.race = race;
-    race.startCountdown();
+    race.startCountdown(this.selectedMapId);
     this.showRaceScreen();
   }
 
@@ -265,7 +303,11 @@ export class App {
     });
 
     guestLobby.onMessage((msg) => {
-      if (!this.race && msg.type === "countdown") this.beginGuestRace(guestLobby);
+      if (msg.type === "countdown" && (!this.race || this.race.isRaceComplete)) {
+        this.teardownRace();
+        this.track = buildTrack(msg.mapId);
+        this.beginGuestRace(guestLobby);
+      }
       this.race?.handleNetMessage(msg);
     });
 
@@ -341,20 +383,9 @@ export class App {
       false,
       (msg) => guestLobby.send(msg),
     );
+    this.activeGuestLobby = guestLobby;
     this.input = input;
     this.race = race;
-    this.showRaceScreen();
-  }
-
-  // -------------------------------------------------------------- Practice
-
-  private startPractice() {
-    const localInfo = this.localPlayerInfo(0);
-    const input = new InputManager();
-    const race = new RaceSession(this.track, localInfo, [localInfo], input, true, () => {});
-    this.input = input;
-    this.race = race;
-    race.startCountdown();
     this.showRaceScreen();
   }
 
@@ -363,6 +394,8 @@ export class App {
   private showRaceScreen() {
     this.canvas.classList.add("visible");
     document.body.classList.add("racing");
+    this.prevCountdownSecond = -1;
+    this.prevLap = 0;
 
     const hud = h(
       "div",
@@ -373,6 +406,7 @@ export class App {
       h("div", "hud-standings"),
       h("div", "hud-countdown"),
       h("div", "hud-boost-flash", "BOOST!"),
+      button("☰ Menu", "hud-quit-btn", () => this.showMenu()),
     );
 
     this.stopScanner();
@@ -389,10 +423,30 @@ export class App {
 
     this.render(race);
     this.updateHud(race, hud);
+    this.updateSounds(race);
 
     if (race.isRaceComplete && !this.resultsShown) {
       this.resultsShown = true;
+      sound.finish();
       setTimeout(() => this.showResults(race), 1200);
+    }
+  }
+
+  private updateSounds(race: RaceSession) {
+    if (race.countdownMs > 0) {
+      const second = Math.ceil(race.countdownMs / 1000);
+      if (second !== this.prevCountdownSecond) {
+        sound.countdownTick();
+        this.prevCountdownSecond = second;
+      }
+    } else if (this.prevCountdownSecond !== 0) {
+      sound.countdownGo();
+      this.prevCountdownSecond = 0;
+    }
+
+    if (race.localCar.lap > this.prevLap) {
+      this.prevLap = race.localCar.lap;
+      if (!race.localCar.finished) sound.lap();
     }
   }
 
@@ -466,6 +520,11 @@ export class App {
     this.canvas.classList.remove("visible");
     document.body.classList.remove("racing");
 
+    const winner = race.results[0];
+    const winnerLine = winner
+      ? h("p", "winner-line", `🏆 ${winner.name} wins! ${formatTime(winner.timeMs)}`)
+      : null;
+
     const list = h(
       "div",
       "results-list",
@@ -480,12 +539,27 @@ export class App {
       ),
     );
 
+    const actions = h(
+      "div",
+      "menu-actions",
+      race.isHost
+        ? button("Play Again", "btn btn-primary", () => {
+            const hostLobby = this.activeHostLobby;
+            this.teardownRace();
+            if (hostLobby) this.beginHostRace(hostLobby);
+            else this.showMenu();
+          })
+        : h("p", "hint", "Waiting for the host to start another race, or head back to the menu."),
+      button("Back to Menu", "btn btn-secondary", () => this.showMenu()),
+    );
+
     const screen = h(
       "div",
       "screen results-screen",
       h("h2", "title", "🏁 Results"),
+      winnerLine,
       list,
-      h("div", "menu-actions", button("Back to Menu", "btn btn-primary", () => this.showMenu())),
+      actions,
     );
     this.setScreen(screen);
   }

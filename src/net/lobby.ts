@@ -165,6 +165,12 @@ export class HostLobby {
   get connectedCount() {
     return this.links.size;
   }
+
+  /** Closes every guest connection (e.g. when the host leaves for the menu). */
+  close() {
+    for (const link of this.links.values()) link.close();
+    this.links.clear();
+  }
 }
 
 /** Runs on a friend's device joining someone else's race. */
@@ -221,5 +227,11 @@ export class GuestLobby {
 
   get connected() {
     return !!this.link;
+  }
+
+  /** Closes the connection to the host (e.g. when leaving for the menu). */
+  close() {
+    this.link?.close();
+    this.link = null;
   }
 }

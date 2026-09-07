@@ -1,3 +1,5 @@
+import { sound } from "../game/sound";
+
 type Child = Node | string | null | undefined | false;
 
 export function h<K extends keyof HTMLElementTagNameMap>(
@@ -16,6 +18,9 @@ export function h<K extends keyof HTMLElementTagNameMap>(
 
 export function button(label: string, className: string, onClick: () => void): HTMLButtonElement {
   const b = h("button", className, label);
-  b.addEventListener("click", onClick);
+  b.addEventListener("click", () => {
+    sound.unlock();
+    onClick();
+  });
   return b;
 }

@@ -12,6 +12,7 @@
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 
 html,
@@ -46,7 +47,9 @@ body {
   inset: 0;
   display: flex;
   align-items: center;
+  align-items: safe center;
   justify-content: center;
+  justify-content: safe center;
   padding: 20px;
   overflow-y: auto;
   pointer-events: none;
@@ -62,7 +65,7 @@ body {
   max-width: 420px;
   background: var(--panel);
   border: 1px solid var(--panel-border);
-  border-radius: 20px;
+  border-radius: 24px;
   padding: 28px 24px;
   display: flex;
   flex-direction: column;
@@ -101,9 +104,10 @@ body {
   background: #0c0e1e;
   border: 1px solid var(--panel-border);
   color: var(--text);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 10px 12px;
   font-size: 16px;
+  user-select: text;
 }
 
 .color-swatches {
@@ -132,7 +136,7 @@ body {
 
 .btn {
   border: none;
-  border-radius: 12px;
+  border-radius: 16px;
   padding: 14px 16px;
   font-size: 16px;
   font-weight: 600;
@@ -175,7 +179,7 @@ body {
   align-items: center;
   gap: 10px;
   background: #0c0e1e;
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 8px 12px;
 }
 .roster-dot {
@@ -195,7 +199,7 @@ body {
   gap: 10px;
 }
 .invite-box canvas {
-  border-radius: 12px;
+  border-radius: 16px;
   max-width: 100%;
 }
 
@@ -206,7 +210,7 @@ body {
   font-variant-numeric: tabular-nums;
   background: #0c0e1e;
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: 16px;
   padding: 6px 22px;
 }
 
@@ -214,13 +218,35 @@ body {
   background: #0c0e1e;
   border: 1px solid var(--panel-border);
   color: var(--text);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 12px;
   font-size: 32px;
   font-weight: 700;
   letter-spacing: 0.3em;
   text-align: center;
   font-variant-numeric: tabular-nums;
+  user-select: text;
+}
+
+.map-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.map-option {
+  border: 1px solid var(--panel-border);
+  background: #0c0e1e;
+  color: var(--muted);
+  border-radius: 14px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.map-option.selected {
+  border-color: var(--accent);
+  color: var(--text);
+  background: rgba(239, 68, 68, 0.15);
 }
 
 .scan-overlay {
@@ -239,7 +265,7 @@ body {
   width: min(80vw, 360px);
   aspect-ratio: 1;
   object-fit: cover;
-  border-radius: 16px;
+  border-radius: 20px;
   border: 3px solid var(--accent);
 }
 
@@ -256,7 +282,7 @@ body {
   left: 16px;
   background: rgba(10, 12, 24, 0.6);
   padding: 8px 14px;
-  border-radius: 10px;
+  border-radius: 14px;
   font-weight: 600;
   font-size: 15px;
 }
@@ -267,7 +293,7 @@ body {
   transform: translateX(-50%);
   background: rgba(10, 12, 24, 0.6);
   padding: 8px 14px;
-  border-radius: 10px;
+  border-radius: 14px;
   font-weight: 600;
   font-size: 15px;
   font-variant-numeric: tabular-nums;
@@ -279,7 +305,7 @@ body {
   transform: translateX(-50%);
   background: rgba(10, 12, 24, 0.55);
   padding: 6px 12px;
-  border-radius: 8px;
+  border-radius: 12px;
   font-size: 12px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -289,7 +315,7 @@ body {
   top: calc(max(14px, env(safe-area-inset-top)) + 46px);
   left: 16px;
   background: rgba(10, 12, 24, 0.55);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 6px 10px;
   font-size: 12px;
   min-width: 110px;
@@ -317,6 +343,20 @@ body {
 }
 .hud-boost-flash.visible {
   opacity: 1;
+}
+.hud-quit-btn {
+  pointer-events: auto;
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  right: 16px;
+  background: rgba(10, 12, 24, 0.6);
+  color: var(--text);
+  border: none;
+  padding: 8px 14px;
+  border-radius: 14px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
 }
 .hud-countdown {
   position: absolute;
@@ -372,11 +412,6 @@ body {
 .touch-btn.pressed {
   background: rgba(255, 255, 255, 0.3);
 }
-.touch-steer {
-  width: 64px;
-  height: 64px;
-  font-size: 22px;
-}
 .touch-brake {
   width: 56px;
   height: 56px;
@@ -386,8 +421,30 @@ body {
 .touch-gas {
   width: 84px;
   height: 84px;
-  font-size: 15px;
+  font-size: 30px;
   background: rgba(239, 68, 68, 0.35);
+}
+
+.joystick-base {
+  pointer-events: auto;
+  position: relative;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+}
+.joystick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  margin-left: -24px;
+  margin-top: -24px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+  border: 2px solid rgba(255, 255, 255, 0.5);
 }
 
 /* ------------------------------------------------------------- Results */
@@ -403,7 +460,7 @@ body {
   gap: 10px;
   align-items: center;
   background: #0c0e1e;
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 10px 12px;
 }
 .results-place {
@@ -413,6 +470,13 @@ body {
 .results-time {
   font-variant-numeric: tabular-nums;
   color: var(--muted);
+}
+.winner-line {
+  margin: 0;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fde68a;
 }
 
 /* --------------------------------------------------------- Portrait mode */
@@ -431,8 +495,8 @@ body {
     width: 76px;
     height: 76px;
   }
-  .touch-steer {
-    width: 58px;
-    height: 58px;
+  .joystick-base {
+    width: 92px;
+    height: 92px;
   }
 }

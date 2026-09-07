@@ -8,7 +8,7 @@ export interface PlayerInfo {
 export type NetMessage =
   | { type: "hello"; player: PlayerInfo }
   | { type: "roster"; players: PlayerInfo[] }
-  | { type: "countdown"; ms: number }
+  | { type: "countdown"; ms: number; mapId: string }
   | {
       type: "state";
       id: string;

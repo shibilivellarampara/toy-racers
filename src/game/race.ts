@@ -1,8 +1,9 @@
-import { Car, DEFAULT_TUNING } from "./physics";
+import { Car, DEFAULT_TUNING, resolveCarCollision } from "./physics";
 import type { InputManager } from "./input";
 import { resolveTrackCollision, startPosition, updateLapProgress } from "./track";
 import type { TrackDef } from "./track";
 import type { NetMessage, PlayerInfo } from "../net/protocol";
+import { sound } from "./sound";
 
 export interface RemoteCarView {
   info: PlayerInfo;
@@ -46,6 +47,7 @@ export class RaceSession {
   private finishedIds = new Set<string>();
   private placeCounter = 1;
   private sendAccumulator = 0;
+  private bumpCooldown = 0;
   private roster: PlayerInfo[];
 
   constructor(
@@ -90,10 +92,10 @@ export class RaceSession {
     this.remotes.delete(id);
   }
 
-  startCountdown() {
+  startCountdown(mapId: string) {
     this.countdownMs = COUNTDOWN_MS;
     this.started = false;
-    if (this.isHost) this.sendFn({ type: "countdown", ms: COUNTDOWN_MS });
+    if (this.isHost) this.sendFn({ type: "countdown", ms: COUNTDOWN_MS, mapId });
   }
 
   /** Guests call this on receiving a host 'countdown' message. */
@@ -161,10 +163,18 @@ export class RaceSession {
       const input = this.input.getInput();
       this.localCar.step(dt, input);
       resolveTrackCollision(this.localCar, this.track);
+      this.bumpCooldown = Math.max(0, this.bumpCooldown - dt);
+      for (const remote of this.remotes.values()) {
+        if (resolveCarCollision(this.localCar, remote.car) && this.bumpCooldown <= 0) {
+          sound.bump();
+          this.bumpCooldown = 0.35;
+        }
+      }
       if (this.localCar.boostCooldown <= 0) {
         for (const pad of this.track.boostPads) {
           if (Math.hypot(this.localCar.x - pad.x, this.localCar.y - pad.y) <= pad.radius) {
             this.localCar.applyBoost();
+            sound.boost();
             break;
           }
         }

@@ -145,6 +145,29 @@ export class Car {
   }
 }
 
+/** Pushes `car` out of `other` if they overlap; only moves `car` (each peer resolves its own car). */
+/** Returns true if a collision was resolved (useful for triggering a bump sound/effect). */
+export function resolveCarCollision(car: Car, other: Car): boolean {
+  const dx = other.x - car.x;
+  const dy = other.y - car.y;
+  const dist = Math.hypot(dx, dy);
+  const minDist = car.tuning.radius + other.tuning.radius;
+  if (dist <= 0 || dist >= minDist) return false;
+
+  const nx = dx / dist;
+  const ny = dy / dist;
+  const overlap = minDist - dist;
+  car.x -= nx * overlap;
+  car.y -= ny * overlap;
+
+  const into = car.vx * nx + car.vy * ny;
+  if (into > 0) {
+    car.vx -= nx * into * 1.3;
+    car.vy -= ny * into * 1.3;
+  }
+  return true;
+}
+
 export function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }

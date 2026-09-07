@@ -139,7 +139,7 @@ export function drawCar(ctx: CanvasRenderingContext2D, rc: RenderCar) {
   ctx.fillRect(-len * 0.32, wid / 2 - wheelW + 1, wheelH, wheelW);
 
   // body
-  roundRect(ctx, -len / 2, -wid / 2, len, wid, 6);
+  roundRect(ctx, -len / 2, -wid / 2, len, wid, 8);
   ctx.fillStyle = color;
   ctx.fill();
   ctx.strokeStyle = rc.boosting ? "#7dd3fc" : "rgba(0,0,0,0.4)";
@@ -149,7 +149,7 @@ export function drawCar(ctx: CanvasRenderingContext2D, rc: RenderCar) {
   ctx.shadowColor = "transparent";
 
   // cabin / windshield
-  roundRect(ctx, -len * 0.06, -wid * 0.32, len * 0.4, wid * 0.64, 4);
+  roundRect(ctx, -len * 0.06, -wid * 0.32, len * 0.4, wid * 0.64, 5);
   ctx.fillStyle = "#12172a";
   ctx.fill();
 
@@ -193,7 +193,7 @@ export function drawMinimap(
   const b = track.bounds;
   const scale = Math.min(size / (b.maxX - b.minX + 80), size / (b.maxY - b.minY + 80));
   const x0 = canvasWidth - size - pad;
-  const y0 = pad;
+  const y0 = pad + 46; // leave room for the "Menu" button above
 
   ctx.save();
   ctx.globalAlpha = 0.85;
