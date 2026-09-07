@@ -1,0 +1,184 @@
+import {
+  completeGuestConnection,
+  completeHostConnection,
+  createGuestAnswer,
+  createHostOffer,
+} from "./webrtc";
+import type { PeerLink } from "./webrtc";
+import { PLAYER_COLORS, randomPlayerId } from "./protocol";
+import type { NetMessage, PlayerInfo } from "./protocol";
+
+export interface QRPayload {
+  k: "offer" | "answer";
+  sdp: RTCSessionDescriptionInit;
+}
+
+export function encodePayload(p: QRPayload): string {
+  return JSON.stringify(p);
+}
+
+export function decodePayload(raw: string): QRPayload {
+  const parsed = JSON.parse(raw);
+  if (parsed.k !== "offer" && parsed.k !== "answer") throw new Error("Not a Toy Racers pairing code");
+  return parsed as QRPayload;
+}
+
+type Listener<T> = (arg: T) => void;
+
+/** Runs on the device that starts the race; relays state between all guests. */
+export class HostLobby {
+  players: PlayerInfo[] = [];
+  localPlayer: PlayerInfo;
+  private links = new Map<string, PeerLink>();
+  private nextSlot = 1;
+  private rosterListeners: Listener<PlayerInfo[]>[] = [];
+  private messageListeners: Listener<{ msg: NetMessage; fromId: string }>[] = [];
+
+  constructor(localPlayer: PlayerInfo) {
+    this.localPlayer = localPlayer;
+    this.players = [localPlayer];
+  }
+
+  onRosterChange(fn: Listener<PlayerInfo[]>) {
+    this.rosterListeners.push(fn);
+  }
+
+  onMessage(fn: Listener<{ msg: NetMessage; fromId: string }>) {
+    this.messageListeners.push(fn);
+  }
+
+  /** Step 1: host generates an offer + QR payload for the next friend to scan. */
+  async createInvite() {
+    const { pc, control, state, offer } = await createHostOffer();
+    const payload = encodePayload({ k: "offer", sdp: offer });
+    return { pc, control, state, payload };
+  }
+
+  /** Step 2: host scans the friend's answer QR to finish pairing them in. */
+  async acceptAnswer(
+    pc: RTCPeerConnection,
+    control: RTCDataChannel,
+    state: RTCDataChannel,
+    answerPayload: string,
+  ): Promise<PlayerInfo> {
+    const parsed = decodePayload(answerPayload);
+    if (parsed.k !== "answer") throw new Error("That code is an invite, not an answer. Ask your friend to scan first.");
+    const link = await completeHostConnection(pc, control, state, parsed.sdp);
+
+    let resolvedId = randomPlayerId();
+    return new Promise<PlayerInfo>((resolve) => {
+      link.onMessage((msg) => {
+        if (msg.type === "hello") {
+          const slot = this.nextSlot++;
+          const color = this.assignColor(msg.player.color);
+          const info: PlayerInfo = {
+            id: msg.player.id,
+            name: msg.player.name || `Racer ${slot + 1}`,
+            color,
+            slot,
+          };
+          resolvedId = info.id;
+          this.links.set(info.id, link);
+          this.players = [...this.players.filter((p) => p.id !== info.id), info].sort(
+            (a, b) => a.slot - b.slot,
+          );
+          this.broadcastRoster();
+          resolve(info);
+        } else {
+          this.messageListeners.forEach((fn) => fn({ msg, fromId: resolvedId }));
+          this.relay(msg, resolvedId);
+        }
+      });
+      link.onClose(() => this.removePlayer(resolvedId));
+    });
+  }
+
+  private assignColor(preferred: string) {
+    const used = new Set(this.players.map((p) => p.color));
+    if (preferred && !used.has(preferred)) return preferred;
+    return PLAYER_COLORS.find((c) => !used.has(c)) ?? PLAYER_COLORS[this.players.length % PLAYER_COLORS.length];
+  }
+
+  private relay(msg: NetMessage, fromId: string) {
+    for (const [id, link] of this.links) {
+      if (id !== fromId) link.send(msg);
+    }
+  }
+
+  /** Send to every connected guest (state messages go on the unreliable channel). */
+  broadcast(msg: NetMessage) {
+    for (const link of this.links.values()) link.send(msg);
+    if (msg.type === "roster") this.rosterListeners.forEach((fn) => fn(this.players));
+  }
+
+  private broadcastRoster() {
+    this.broadcast({ type: "roster", players: this.players });
+  }
+
+  private removePlayer(id: string) {
+    if (!this.links.has(id)) return;
+    this.links.delete(id);
+    this.players = this.players.filter((p) => p.id !== id);
+    this.broadcastRoster();
+  }
+
+  get connectedCount() {
+    return this.links.size;
+  }
+}
+
+/** Runs on a friend's device joining someone else's race. */
+export class GuestLobby {
+  private link: PeerLink | null = null;
+  players: PlayerInfo[] = [];
+  localPlayer: PlayerInfo;
+  private rosterListeners: Listener<PlayerInfo[]>[] = [];
+  private messageListeners: Listener<NetMessage>[] = [];
+
+  constructor(name: string, preferredColor: string) {
+    this.localPlayer = { id: randomPlayerId(), name, color: preferredColor, slot: -1 };
+  }
+
+  onRosterChange(fn: Listener<PlayerInfo[]>) {
+    this.rosterListeners.push(fn);
+  }
+
+  onMessage(fn: Listener<NetMessage>) {
+    this.messageListeners.push(fn);
+  }
+
+  /** Step 1: scan the host's offer QR, produce an answer payload to show back. */
+  async createAnswer(offerPayload: string) {
+    const parsed = decodePayload(offerPayload);
+    if (parsed.k !== "offer") throw new Error("That code is an answer, not an invite. Ask your friend to show their invite QR.");
+    const created = await createGuestAnswer(parsed.sdp);
+    const payload = encodePayload({ k: "answer", sdp: created.answer });
+
+    completeGuestConnection(created).then((link) => {
+      this.link = link;
+      link.onMessage((msg) => this.handleMessage(msg));
+      link.send({ type: "hello", player: this.localPlayer });
+    });
+
+    return payload;
+  }
+
+  private handleMessage(msg: NetMessage) {
+    if (msg.type === "roster") {
+      this.players = msg.players;
+      const me = msg.players.find((p) => p.id === this.localPlayer.id);
+      if (me) this.localPlayer = me;
+      this.rosterListeners.forEach((fn) => fn(this.players));
+      return;
+    }
+    this.messageListeners.forEach((fn) => fn(msg));
+  }
+
+  send(msg: NetMessage) {
+    this.link?.send(msg);
+  }
+
+  get connected() {
+    return !!this.link;
+  }
+}
