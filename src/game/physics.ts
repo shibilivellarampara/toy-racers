@@ -29,6 +29,8 @@ export const BOOST_DURATION = 2.5; // seconds
 export const BOOST_COOLDOWN = 4; // seconds before a pad can retrigger on the same car
 const BOOST_SPEED_MULT = 1.55;
 const BOOST_ACCEL_MULT = 1.8;
+const POTHOLE_SPEED_LOSS = 0.35; // fraction of speed shed on impact
+export const POTHOLE_COOLDOWN = 1.2; // seconds before the same pothole can retrigger
 
 export class Car {
   x: number;
@@ -57,6 +59,7 @@ export class Car {
   topSpeed = 0;
   boostTimer = 0;
   boostCooldown = 0;
+  potholeCooldown = 0;
 
   constructor(x: number, y: number, angle: number, tuning: CarTuning = DEFAULT_TUNING) {
     this.x = x;
@@ -79,6 +82,7 @@ export class Car {
     this.topSpeed = 0;
     this.boostTimer = 0;
     this.boostCooldown = 0;
+    this.potholeCooldown = 0;
     this.segmentHint = 0;
   }
 
@@ -92,9 +96,17 @@ export class Car {
     return this.boostTimer > 0;
   }
 
+  /** Jolts the car for driving over a pothole; safe to call repeatedly (cooldown-gated by the caller). */
+  hitPothole() {
+    this.vx *= 1 - POTHOLE_SPEED_LOSS;
+    this.vy *= 1 - POTHOLE_SPEED_LOSS;
+    this.potholeCooldown = POTHOLE_COOLDOWN;
+  }
+
   step(dt: number, input: CarInput) {
     if (this.boostTimer > 0) this.boostTimer = Math.max(0, this.boostTimer - dt);
     if (this.boostCooldown > 0) this.boostCooldown = Math.max(0, this.boostCooldown - dt);
+    if (this.potholeCooldown > 0) this.potholeCooldown = Math.max(0, this.potholeCooldown - dt);
 
     const boosted = this.boosting;
     const t: CarTuning = boosted

@@ -126,6 +126,23 @@ export class App {
     setTimeout(this.resizeCanvas, 250);
   };
 
+  // Belt-and-suspenders: if a resize/orientation event ever gets missed or
+  // arrives late (seen on some mobile browsers around chrome show/hide),
+  // this catches the drift on the very next rendered frame instead of
+  // leaving the canvas buffer sized for a stale layout — which is what
+  // makes the camera look off-center even though the centering math itself
+  // is correct.
+  private ensureCanvasSize() {
+    const cssWidth = this.canvas.clientWidth;
+    const cssHeight = this.canvas.clientHeight;
+    if (cssWidth <= 0 || cssHeight <= 0) return;
+    const expectedW = Math.round(cssWidth * this.dpr);
+    const expectedH = Math.round(cssHeight * this.dpr);
+    if (Math.abs(this.canvas.width - expectedW) > 1 || Math.abs(this.canvas.height - expectedH) > 1) {
+      this.resizeCanvas();
+    }
+  }
+
   private setScreen(el: HTMLElement) {
     this.stopScanner();
     this.uiRoot.replaceChildren(el);
@@ -511,6 +528,7 @@ export class App {
   }
 
   private frame(dt: number, hud: HTMLElement) {
+    this.ensureCanvasSize();
     const race = this.race;
     if (!race) return;
     race.update(dt);
@@ -551,8 +569,12 @@ export class App {
 
   private render(race: RaceSession) {
     const ctx = this.ctx;
-    const w = this.canvas.width / this.dpr;
-    const h2 = this.canvas.height / this.dpr;
+    // Ground truth: the canvas's actual current CSS layout size, not a
+    // value derived from the backing-buffer dimensions we last set — those
+    // two can drift apart for a frame or two around resize/orientation
+    // events, and that drift is what makes the camera look off-center.
+    const w = this.canvas.clientWidth;
+    const h2 = this.canvas.clientHeight;
 
     ctx.save();
     applyCamera(ctx, w, h2, race.localCar.x, race.localCar.y);

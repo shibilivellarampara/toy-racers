@@ -22,6 +22,7 @@ export function drawTrack(ctx: CanvasRenderingContext2D, track: TrackDef) {
   ctx.fillStyle = "#1c6b3c";
   ctx.fillRect(b.minX - 250, b.minY - 250, b.maxX - b.minX + 500, b.maxY - b.minY + 500);
   drawGrassPatches(ctx, track);
+  drawRiver(ctx, track);
 
   // track surface (outer minus inner via even-odd fill)
   ctx.fillStyle = "#3a3f4b";
@@ -50,8 +51,87 @@ export function drawTrack(ctx: CanvasRenderingContext2D, track: TrackDef) {
 
   drawStartLine(ctx, track);
   drawBoostPads(ctx, track);
+  drawPotholes(ctx, track);
+  drawBridgeDeck(ctx, track);
   drawScenery(ctx, track);
   ctx.restore();
+}
+
+function drawRiver(ctx: CanvasRenderingContext2D, track: TrackDef) {
+  const { x, y, angle, width } = track.bridge;
+  const perpAngle = angle + Math.PI / 2;
+  const halfLen = width * 1.3 + 260;
+  const riverWidth = 58;
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(perpAngle);
+  ctx.fillStyle = "#3b82c4";
+  ctx.fillRect(-halfLen, -riverWidth / 2, halfLen * 2, riverWidth);
+  ctx.fillStyle = "rgba(255,255,255,0.22)";
+  const t = performance.now() / 900;
+  for (let i = -halfLen; i < halfLen; i += 20) {
+    const wobble = Math.sin(t + i * 0.05) * 3;
+    ctx.fillRect(i, wobble - riverWidth * 0.12, 11, 3);
+  }
+  ctx.restore();
+}
+
+function drawBridgeDeck(ctx: CanvasRenderingContext2D, track: TrackDef) {
+  const { x, y, angle, width } = track.bridge;
+  const span = 78;
+  const halfW = width / 2;
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+
+  ctx.fillStyle = "#8b5e34";
+  ctx.fillRect(-span / 2, -halfW, span, width);
+  ctx.fillStyle = "rgba(0,0,0,0.18)";
+  for (let px = -span / 2 + 6; px < span / 2; px += 10) {
+    ctx.fillRect(px, -halfW, 3, width);
+  }
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  for (let px = -span / 2 + 3; px < span / 2; px += 10) {
+    ctx.fillRect(px, -halfW, 2, width);
+  }
+
+  ctx.fillStyle = "#5c3d21";
+  ctx.fillRect(-span / 2 - 4, -halfW - 7, span + 8, 7);
+  ctx.fillRect(-span / 2 - 4, halfW, span + 8, 7);
+  ctx.fillStyle = "#3f2a17";
+  for (let px = -span / 2; px <= span / 2 + 1; px += span / 3) {
+    ctx.fillRect(px - 2.5, -halfW - 10, 5, 10);
+    ctx.fillRect(px - 2.5, halfW, 5, 10);
+  }
+  ctx.restore();
+}
+
+function drawPotholes(ctx: CanvasRenderingContext2D, track: TrackDef) {
+  for (const hole of track.potholes) {
+    ctx.save();
+    ctx.translate(hole.x, hole.y);
+    ctx.rotate(hole.rotation);
+    ctx.fillStyle = "#232629";
+    ctx.beginPath();
+    const pts = 8;
+    for (let i = 0; i < pts; i++) {
+      const a = (i / pts) * Math.PI * 2;
+      const r = hole.radius * (i % 2 === 0 ? 1 : 0.72);
+      const px = Math.cos(a) * r;
+      const py = Math.sin(a) * r * 0.75;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "rgba(0,0,0,0.4)";
+    ctx.beginPath();
+    ctx.ellipse(-hole.radius * 0.15, -hole.radius * 0.12, hole.radius * 0.5, hole.radius * 0.38, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 }
 
 function drawGrassPatches(ctx: CanvasRenderingContext2D, track: TrackDef) {

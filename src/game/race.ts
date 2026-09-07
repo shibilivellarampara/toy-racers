@@ -179,6 +179,15 @@ export class RaceSession {
           }
         }
       }
+      if (this.localCar.potholeCooldown <= 0) {
+        for (const hole of this.track.potholes) {
+          if (Math.hypot(this.localCar.x - hole.x, this.localCar.y - hole.y) <= hole.radius) {
+            this.localCar.hitPothole();
+            sound.bump();
+            break;
+          }
+        }
+      }
       const completedNow = updateLapProgress(this.localCar, this.track);
       if (completedNow) {
         if (this.isHost) {

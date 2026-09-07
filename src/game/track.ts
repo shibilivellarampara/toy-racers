@@ -11,6 +11,13 @@ export interface BoostPad {
   radius: number;
 }
 
+export interface Pothole {
+  x: number;
+  y: number;
+  radius: number;
+  rotation: number;
+}
+
 export interface SceneryItem {
   x: number;
   y: number;
@@ -36,8 +43,10 @@ export interface TrackDef {
   centerX: number;
   centerY: number;
   boostPads: BoostPad[];
+  potholes: Pothole[];
   scenery: SceneryItem[];
   grassPatches: GrassPatch[];
+  bridge: { x: number; y: number; angle: number; width: number };
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
@@ -103,29 +112,48 @@ interface TrackOption {
   name: string;
   centerline: Centerline;
   boostProgress: number[];
+  potholeProgress: number[];
+  bridgeProgress: number;
 }
 
 export const TRACK_LIST: TrackOption[] = [
-  { id: "circuit", name: "Grand Circuit", centerline: GRAND_CIRCUIT, boostProgress: [0.04, 0.58, 0.86] },
-  { id: "oval", name: "Speedway Oval", centerline: SPEEDWAY_OVAL, boostProgress: [0.1, 0.4, 0.65, 0.9] },
+  {
+    id: "circuit",
+    name: "Grand Circuit",
+    centerline: GRAND_CIRCUIT,
+    boostProgress: [0.04, 0.58, 0.86],
+    potholeProgress: [0.2, 0.48, 0.75, 0.93],
+    bridgeProgress: 0.31,
+  },
+  {
+    id: "oval",
+    name: "Speedway Oval",
+    centerline: SPEEDWAY_OVAL,
+    boostProgress: [0.1, 0.4, 0.65, 0.9],
+    potholeProgress: [0.25, 0.52, 0.78],
+    bridgeProgress: 0.5,
+  },
   {
     id: "twister",
     name: "Technical Twister",
     centerline: TECHNICAL_TWISTER,
     boostProgress: [0.03, 0.42, 0.72],
+    potholeProgress: [0.18, 0.55, 0.85],
+    bridgeProgress: 0.38,
   },
 ];
 export const DEFAULT_TRACK_ID = TRACK_LIST[0].id;
 
 export function buildTrack(id: string): TrackDef {
   const option = TRACK_LIST.find((t) => t.id === id) ?? TRACK_LIST[0];
-  return buildTrackFromCenterline(option.centerline, option.boostProgress);
+  return buildTrackFromCenterline(option);
 }
 
 const LAPS_TO_WIN = 3;
 const CHECKPOINT_COUNT = 24;
 
-function buildTrackFromCenterline(centerlineTriples: Centerline, boostProgress: number[]): TrackDef {
+function buildTrackFromCenterline(option: TrackOption): TrackDef {
+  const { centerline: centerlineTriples, boostProgress, potholeProgress, bridgeProgress } = option;
   const centerline = centerlineTriples.map(([x, y]) => ({ x, y }));
   const widths = centerlineTriples.map(([, , w]) => w);
   const n = centerline.length;
@@ -172,6 +200,11 @@ function buildTrackFromCenterline(centerlineTriples: Centerline, boostProgress: 
   );
 
   const boostPads: BoostPad[] = boostProgress.map((p) => pointAtProgress(centerline, cumLen, totalLen, p, 60));
+  const potholes: Pothole[] = potholeProgress.map((p) => {
+    const pt = pointAtProgress(centerline, cumLen, totalLen, p, 26);
+    return { ...pt, rotation: Math.random() * Math.PI * 2 };
+  });
+  const bridge = bridgeAtProgress(centerline, widths, cumLen, totalLen, bridgeProgress);
   const scenery = generateScenery(outer, inner, bounds);
   const grassPatches = generateGrassPatches(bounds);
 
@@ -185,35 +218,64 @@ function buildTrackFromCenterline(centerlineTriples: Centerline, boostProgress: 
     centerX,
     centerY,
     boostPads,
+    potholes,
     scenery,
     grassPatches,
+    bridge,
     bounds,
   };
+}
+
+function bridgeAtProgress(
+  centerline: Point[],
+  widths: number[],
+  cumLen: number[],
+  totalLen: number,
+  progress: number,
+): { x: number; y: number; angle: number; width: number } {
+  const target = progress * totalLen;
+  const n = centerline.length;
+  for (let i = 0; i < n; i++) {
+    const segStart = cumLen[i];
+    const segEnd = i + 1 < n ? cumLen[i + 1] : totalLen;
+    if (target >= segStart && target <= segEnd) {
+      const a = centerline[i];
+      const b = centerline[(i + 1) % n];
+      const t = (target - segStart) / (segEnd - segStart || 1);
+      const width = lerp(widths[i], widths[(i + 1) % n], t);
+      const angle = Math.atan2(b.y - a.y, b.x - a.x);
+      return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), angle, width };
+    }
+  }
+  const last = centerline[n - 1];
+  return { x: last.x, y: last.y, angle: 0, width: widths[n - 1] };
 }
 
 type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
 
 function generateScenery(outer: Point[], inner: Point[], bounds: Bounds): SceneryItem[] {
   const items: SceneryItem[] = [];
-  const types: SceneryItem["type"][] = ["tree", "bush", "rock"];
+  // Weighted toward trees so the surroundings read as a proper treeline
+  // rather than a sparse scatter of mixed props.
+  const weightedTypes: SceneryItem["type"][] = ["tree", "tree", "tree", "bush", "bush", "rock"];
   const randomItem = (x: number, y: number): SceneryItem => ({
     x,
     y,
-    type: types[Math.floor(Math.random() * types.length)],
+    type: weightedTypes[Math.floor(Math.random() * weightedTypes.length)],
     scale: 0.7 + Math.random() * 0.9,
     rotation: Math.random() * Math.PI * 2,
   });
 
   // Outside the track, in the surrounding grass.
-  for (let i = 0; i < 140; i++) {
-    const x = bounds.minX - 200 + Math.random() * (bounds.maxX - bounds.minX + 400);
-    const y = bounds.minY - 200 + Math.random() * (bounds.maxY - bounds.minY + 400);
+  for (let i = 0; i < 220; i++) {
+    const x = bounds.minX - 220 + Math.random() * (bounds.maxX - bounds.minX + 440);
+    const y = bounds.minY - 220 + Math.random() * (bounds.maxY - bounds.minY + 440);
     const d = polygonSDF(x, y, outer);
-    if (d > 45 && d < 380) items.push(randomItem(x, y));
+    if (d > 45 && d < 420) items.push(randomItem(x, y));
   }
 
   // In the infield, inside the inner hole.
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 80; i++) {
     const x = bounds.minX + Math.random() * (bounds.maxX - bounds.minX);
     const y = bounds.minY + Math.random() * (bounds.maxY - bounds.minY);
     const d = polygonSDF(x, y, inner);
