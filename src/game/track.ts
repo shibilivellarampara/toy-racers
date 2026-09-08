@@ -38,6 +38,13 @@ export interface GrassPatch {
   shade: number; // -1..1, darker/lighter than the base grass color
 }
 
+export interface MudPatch {
+  x: number;
+  y: number;
+  r: number;
+  rotation: number;
+}
+
 export interface Barricade {
   x: number;
   y: number;
@@ -52,6 +59,8 @@ export interface CrossingDef {
   width: number;
 }
 
+export type Surface = "asphalt" | "mud";
+
 export interface TrackDef {
   outer: Point[];
   inner: Point[];
@@ -61,11 +70,13 @@ export interface TrackDef {
   checkpointCount: number;
   centerX: number;
   centerY: number;
+  surface: Surface;
   boostPads: BoostPad[];
   potholes: Pothole[];
   barricades: Barricade[];
   scenery: SceneryItem[];
   grassPatches: GrassPatch[];
+  mudPatches: MudPatch[];
   bridge: { x: number; y: number; angle: number; width: number };
   crossing: CrossingDef;
   underpass: { x: number; y: number; angle: number; width: number };
@@ -129,6 +140,24 @@ const TECHNICAL_TWISTER: Centerline = [
   [2350, 1050, 260], // continue right sweeper toward start
 ];
 
+/** Open, flowing rally-style loop — wide gentle curves rather than tight
+ * hairpins, since this one's meant to be driven on a loose mud surface
+ * rather than raced flat-out on tarmac. */
+const MUD_TRACK: Centerline = [
+  [2200, 1350, 230], // start/finish straight
+  [1500, 1500, 220],
+  [900, 1450, 210],
+  [500, 1200, 200],
+  [350, 800, 190],
+  [500, 450, 200],
+  [900, 300, 220],
+  [1500, 280, 230],
+  [2000, 400, 220],
+  [2300, 700, 210],
+  [2400, 1000, 220],
+  [2350, 1200, 230],
+];
+
 interface BarricadeSpec {
   progress: number;
   side: 1 | -1;
@@ -138,6 +167,7 @@ interface TrackOption {
   id: string;
   name: string;
   centerline: Centerline;
+  surface?: Surface;
   boostProgress: number[];
   potholeProgress: number[];
   bridgeProgress: number;
@@ -204,6 +234,21 @@ export const TRACK_LIST: TrackOption[] = [
       { progress: 0.94, side: -1 },
     ],
   },
+  {
+    id: "mud",
+    name: "Muddy Rally Loop",
+    centerline: MUD_TRACK,
+    surface: "mud",
+    underpassProgress: 0.03,
+    bridgeProgress: 0.15,
+    potholeProgress: [0.25, 0.45, 0.78],
+    boostProgress: [0.32, 0.55, 0.85],
+    crossingProgress: 0.65,
+    barricades: [
+      { progress: 0.4, side: 1 },
+      { progress: 0.72, side: -1 },
+    ],
+  },
 ];
 export const DEFAULT_TRACK_ID = TRACK_LIST[0].id;
 
@@ -218,6 +263,7 @@ const CHECKPOINT_COUNT = 24;
 function buildTrackFromCenterline(option: TrackOption): TrackDef {
   const {
     centerline: centerlineTriples,
+    surface = "asphalt",
     boostProgress,
     potholeProgress,
     bridgeProgress,
@@ -291,8 +337,9 @@ function buildTrackFromCenterline(option: TrackOption): TrackDef {
       angle: p.angle,
     };
   });
-  const scenery = generateScenery(outer, inner, bounds);
+  const scenery = generateScenery(outer, inner, bounds, surface === "mud" ? 1.6 : 1);
   const grassPatches = generateGrassPatches(bounds);
+  const mudPatches = surface === "mud" ? generateMudPatches(outer, inner) : [];
 
   return {
     outer,
@@ -303,11 +350,13 @@ function buildTrackFromCenterline(option: TrackOption): TrackDef {
     checkpointCount: CHECKPOINT_COUNT,
     centerX,
     centerY,
+    surface,
     boostPads,
     potholes,
     barricades,
     scenery,
     grassPatches,
+    mudPatches,
     bridge,
     crossing,
     underpass,
@@ -359,7 +408,7 @@ function trackPointAtProgress(
 
 type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
 
-function generateScenery(outer: Point[], inner: Point[], bounds: Bounds): SceneryItem[] {
+function generateScenery(outer: Point[], inner: Point[], bounds: Bounds, density = 1): SceneryItem[] {
   const items: SceneryItem[] = [];
   // Weighted toward trees so the surroundings read as a proper treeline
   // rather than a sparse scatter of mixed props.
@@ -384,7 +433,7 @@ function generateScenery(outer: Point[], inner: Point[], bounds: Bounds): Scener
   });
 
   // Outside the track, in the surrounding grass.
-  for (let i = 0; i < 220; i++) {
+  for (let i = 0; i < Math.round(220 * density); i++) {
     const x = bounds.minX - 220 + Math.random() * (bounds.maxX - bounds.minX + 440);
     const y = bounds.minY - 220 + Math.random() * (bounds.maxY - bounds.minY + 440);
     const d = polygonSDF(x, y, outer);
@@ -392,7 +441,7 @@ function generateScenery(outer: Point[], inner: Point[], bounds: Bounds): Scener
   }
 
   // In the infield, inside the inner hole.
-  for (let i = 0; i < 80; i++) {
+  for (let i = 0; i < Math.round(80 * density); i++) {
     const x = bounds.minX + Math.random() * (bounds.maxX - bounds.minX);
     const y = bounds.minY + Math.random() * (bounds.maxY - bounds.minY);
     const d = polygonSDF(x, y, inner);
@@ -400,6 +449,27 @@ function generateScenery(outer: Point[], inner: Point[], bounds: Bounds): Scener
   }
 
   return items;
+}
+
+/** Darker mud/rut blotches scattered across the road surface, sampled
+ * between each outer/inner vertex pair so they stay confined to the
+ * actual road rather than needing a separate progress-based walk. */
+function generateMudPatches(outer: Point[], inner: Point[]): MudPatch[] {
+  const patches: MudPatch[] = [];
+  for (let i = 0; i < outer.length; i++) {
+    const o = outer[i];
+    const inn = inner[i];
+    for (let k = 0; k < 3; k++) {
+      const t = 0.15 + Math.random() * 0.7;
+      patches.push({
+        x: inn.x + (o.x - inn.x) * t,
+        y: inn.y + (o.y - inn.y) * t,
+        r: 10 + Math.random() * 16,
+        rotation: Math.random() * Math.PI,
+      });
+    }
+  }
+  return patches;
 }
 
 function generateGrassPatches(bounds: Bounds): GrassPatch[] {

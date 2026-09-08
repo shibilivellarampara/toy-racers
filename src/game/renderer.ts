@@ -25,32 +25,39 @@ export function drawTrack(ctx: CanvasRenderingContext2D, track: TrackDef, elapse
   ctx.fillRect(b.minX - 250, b.minY - 250, b.maxX - b.minX + 500, b.maxY - b.minY + 500);
   drawGrassPatches(ctx, track);
 
+  const mud = track.surface === "mud";
+
   // track surface (outer minus inner via even-odd fill)
-  ctx.fillStyle = "#3a3f4b";
+  ctx.fillStyle = mud ? "#6b4a2f" : "#3a3f4b";
   ctx.beginPath();
   polygonPath(ctx, track.outer);
   polygonPath(ctx, track.inner);
   ctx.fill("evenodd");
 
-  // kerbs: real racing kerbs alternate red/white, not red/gap — layer a
-  // white dashed stroke then a red one offset by one dash length.
-  ctx.lineWidth = 10;
-  ctx.setLineDash([26, 26]);
-  for (const [color, offset] of [
-    ["#ffffff", 0],
-    ["#e11d2e", 26],
-  ] as const) {
-    ctx.strokeStyle = color;
-    ctx.lineDashOffset = offset;
-    ctx.beginPath();
-    polygonPath(ctx, track.outer);
-    ctx.stroke();
-    ctx.beginPath();
-    polygonPath(ctx, track.inner);
-    ctx.stroke();
+  if (mud) {
+    drawMudTexture(ctx, track);
+    drawRallyTapeEdges(ctx, track);
+  } else {
+    // kerbs: real racing kerbs alternate red/white, not red/gap — layer a
+    // white dashed stroke then a red one offset by one dash length.
+    ctx.lineWidth = 10;
+    ctx.setLineDash([26, 26]);
+    for (const [color, offset] of [
+      ["#ffffff", 0],
+      ["#e11d2e", 26],
+    ] as const) {
+      ctx.strokeStyle = color;
+      ctx.lineDashOffset = offset;
+      ctx.beginPath();
+      polygonPath(ctx, track.outer);
+      ctx.stroke();
+      ctx.beginPath();
+      polygonPath(ctx, track.inner);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
   }
-  ctx.setLineDash([]);
-  ctx.lineDashOffset = 0;
 
   // infield
   ctx.fillStyle = "#2f8f52";
@@ -519,6 +526,42 @@ function drawGrassPatches(ctx: CanvasRenderingContext2D, track: TrackDef) {
     ctx.beginPath();
     ctx.ellipse(p.x, p.y, p.r, p.r * 0.7, 0, 0, Math.PI * 2);
     ctx.fill();
+  }
+}
+
+function drawMudTexture(ctx: CanvasRenderingContext2D, track: TrackDef) {
+  for (const p of track.mudPatches) {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rotation);
+    ctx.fillStyle = "rgba(35,22,12,0.35)";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, p.r, p.r * 0.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(120,90,60,0.2)";
+    ctx.beginPath();
+    ctx.ellipse(-p.r * 0.2, -p.r * 0.15, p.r * 0.5, p.r * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/** Rally stages mark their edges with tape and wooden stakes, not painted
+ * kerbs — swapped in for the mud surface instead of the racing kerb. */
+function drawRallyTapeEdges(ctx: CanvasRenderingContext2D, track: TrackDef) {
+  for (const edge of [track.outer, track.inner]) {
+    ctx.lineWidth = 4;
+    ctx.setLineDash([16, 14]);
+    ctx.strokeStyle = "#e8722c";
+    ctx.beginPath();
+    polygonPath(ctx, edge);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = "#5c3d21";
+    for (let i = 0; i < edge.length; i += 2) {
+      ctx.fillRect(edge[i].x - 3, edge[i].y - 3, 6, 6);
+    }
   }
 }
 
