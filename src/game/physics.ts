@@ -55,6 +55,12 @@ export class Car {
    * (which can misfire on hairpins/chicanes where two unrelated parts of
    * the loop pass close to each other in space). */
   segmentHint = 0;
+  /** Fractional arc-length position (0..1) around the track, updated
+   * alongside segmentHint. AI steering needs this — segmentHint alone
+   * only identifies which (potentially very long) hand-authored segment
+   * the car is nearest to, not where within it, which isn't precise
+   * enough to aim a lookahead point from. */
+  progress = 0;
 
   topSpeed = 0;
   boostTimer = 0;
@@ -84,6 +90,7 @@ export class Car {
     this.boostCooldown = 0;
     this.potholeCooldown = 0;
     this.segmentHint = 0;
+    this.progress = 0;
   }
 
   /** Grants a temporary speed/acceleration boost; safe to call repeatedly (cooldown-gated by the caller). */
@@ -171,6 +178,41 @@ export class Car {
   }
 }
 
+/**
+ * Both cars are locally simulated here (the local player and AI bots, all
+ * stepped by the same peer), so — unlike resolveCarCollision below — both
+ * sides can actually be pushed and have their velocity affected. Without
+ * this, hitting another car felt like hitting a wall: only the attacker
+ * moved, the other car just sat there like a fixed obstacle.
+ */
+export function resolveMutualCarCollision(a: Car, b: Car): boolean {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dist = Math.hypot(dx, dy);
+  const minDist = a.tuning.radius + b.tuning.radius;
+  if (dist <= 0 || dist >= minDist) return false;
+
+  const nx = dx / dist;
+  const ny = dy / dist;
+  const overlap = minDist - dist;
+  a.x -= (nx * overlap) / 2;
+  a.y -= (ny * overlap) / 2;
+  b.x += (nx * overlap) / 2;
+  b.y += (ny * overlap) / 2;
+
+  // Exchange the velocity component along the collision normal (equal
+  // "mass" elastic-ish swap) so the car that got hit visibly takes off,
+  // instead of just absorbing the attacker's push.
+  const aInto = a.vx * nx + a.vy * ny;
+  const bInto = b.vx * nx + b.vy * ny;
+  const restitution = 1.15;
+  a.vx += nx * (bInto - aInto) * restitution;
+  a.vy += ny * (bInto - aInto) * restitution;
+  b.vx += nx * (aInto - bInto) * restitution;
+  b.vy += ny * (aInto - bInto) * restitution;
+  return true;
+}
+
 /** Pushes `car` out of `other` if they overlap; only moves `car` (each peer resolves its own car). */
 /** Returns true if a collision was resolved (useful for triggering a bump sound/effect). */
 export function resolveCarCollision(car: Car, other: Car): boolean {
@@ -194,7 +236,42 @@ export function resolveCarCollision(car: Car, other: Car): boolean {
   return true;
 }
 
-/** Same shape as resolveCarCollision but against a fixed point (barricades, closed rail gates). */
+/**
+ * A closed rail crossing isn't a round obstacle — it's a wall across the
+ * road at one point along it. Modeling it as a circle (the old approach)
+ * meant its radius had to reach the road's full half-width just to block
+ * corner-to-corner, which made the car "hit" it far before actually
+ * reaching the gate. This only resists motion along the barrier's own
+ * travel axis, so the stop happens right at the barrier's thickness, not
+ * some large radius away from its center.
+ */
+export function resolveLineBarrier(
+  car: Car,
+  barrier: { x: number; y: number; angle: number; halfWidth: number; halfThickness: number },
+): boolean {
+  const dx = car.x - barrier.x;
+  const dy = car.y - barrier.y;
+  const cos = Math.cos(barrier.angle);
+  const sin = Math.sin(barrier.angle);
+  const alongTravel = dx * cos + dy * sin;
+  const acrossRoad = -dx * sin + dy * cos;
+  const halfT = barrier.halfThickness + car.tuning.radius;
+  if (Math.abs(alongTravel) >= halfT || Math.abs(acrossRoad) >= barrier.halfWidth) return false;
+
+  const sign = alongTravel >= 0 ? 1 : -1;
+  const overlap = halfT - Math.abs(alongTravel);
+  car.x += cos * sign * overlap;
+  car.y += sin * sign * overlap;
+
+  const into = (car.vx * cos + car.vy * sin) * sign;
+  if (into > 0) {
+    car.vx -= cos * sign * into * 1.3;
+    car.vy -= sin * sign * into * 1.3;
+  }
+  return true;
+}
+
+/** Same shape as resolveCarCollision but against a fixed point (barricades). */
 export function resolveStaticCollision(car: Car, obstacle: { x: number; y: number; radius: number }): boolean {
   const dx = obstacle.x - car.x;
   const dy = obstacle.y - car.y;

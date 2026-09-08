@@ -3,6 +3,9 @@ export interface PlayerInfo {
   name: string;
   color: string;
   slot: number;
+  /** Locally simulated by whichever peer created it (the "vs Computer"
+   * mode) rather than driven by a real connection. */
+  isAI?: boolean;
 }
 
 export type NetMessage =

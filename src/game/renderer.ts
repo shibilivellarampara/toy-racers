@@ -274,23 +274,14 @@ function drawCrossing(ctx: CanvasRenderingContext2D, track: TrackDef, elapsedMs:
     ctx.fillRect(-crossSpan / 2, py, crossSpan, 8);
   }
 
-  // stop line + give-way triangles a car-length before the crossing on
-  // both approaches, so there's a clear "stop here" marking ahead of the
-  // gates rather than the gate being the only sign anything's coming
+  // double white stop line a car-length before the crossing on both
+  // approaches, so there's a clear "stop here" marking ahead of the gates
+  // rather than the gate being the only sign anything's coming
   const stopOffset = crossSpan / 2 + 38;
+  ctx.fillStyle = "#f4f4f4";
   for (const dir of [-1, 1] as const) {
-    ctx.fillStyle = "#f4f4f4";
-    ctx.fillRect(dir * stopOffset - 4, -halfW + 6, 8, width - 12);
-    const triCount = 3;
-    for (let t = 0; t < triCount; t++) {
-      const ty = -halfW + 6 + ((width - 12) / triCount) * (t + 0.5);
-      ctx.beginPath();
-      ctx.moveTo(dir * stopOffset + dir * 6, ty);
-      ctx.lineTo(dir * stopOffset + dir * 18, ty - 7);
-      ctx.lineTo(dir * stopOffset + dir * 18, ty + 7);
-      ctx.closePath();
-      ctx.fill();
-    }
+    ctx.fillRect(dir * stopOffset - 5, -halfW + 6, 4, width - 12);
+    ctx.fillRect(dir * stopOffset + dir * 5 - 2, -halfW + 6, 4, width - 12);
   }
   ctx.restore();
 
@@ -459,6 +450,23 @@ function drawGateAndLights(
   ctx.beginPath();
   ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
   ctx.fill();
+
+  // crossbuck sign — the universal railroad-crossing "X" — fixed to the
+  // post itself (not rotating with the arm), so the post unmistakably
+  // reads as its own roadside structure rather than the arm just floating
+  // in space
+  ctx.save();
+  ctx.translate(0, -16);
+  ctx.strokeStyle = "#f4f4f4";
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-9, -9);
+  ctx.lineTo(9, 9);
+  ctx.moveTo(9, -9);
+  ctx.lineTo(-9, 9);
+  ctx.stroke();
+  ctx.restore();
 
   ctx.rotate(armWorldAngle);
   // Reaches to just short of the centerline (postDist minus a small 6px

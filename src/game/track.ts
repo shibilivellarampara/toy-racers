@@ -155,10 +155,10 @@ export const TRACK_LIST: TrackOption[] = [
     potholeProgress: [0.2, 0.48, 0.75, 0.93],
     bridgeProgress: 0.31,
     crossingProgress: 0.4,
-    // On the straight run into the finish line (the final segment before
-    // wrapping back to progress 0), with enough buffer that it doesn't
-    // overlap the starting grid.
-    underpassProgress: 0.96,
+    // On the start/finish straight, well clear of the barricade at 0.12,
+    // with turn 1 starting right after it at progress ~0.2 — a straight
+    // stretch immediately followed by a turn.
+    underpassProgress: 0.16,
     barricades: [
       { progress: 0.12, side: 1 },
       { progress: 0.66, side: -1 },
@@ -172,10 +172,11 @@ export const TRACK_LIST: TrackOption[] = [
     potholeProgress: [0.25, 0.52, 0.78],
     bridgeProgress: 0.5,
     crossingProgress: 0.97,
-    // The back straightaway (this wide oval's straights sit at the ends of
-    // its minor axis, not its major axis — counterintuitive, but the tight
-    // turns are at the left/right tips and the flat run is top/bottom).
-    underpassProgress: 0.72,
+    // On the back straightaway approaching the tight turn at its left tip
+    // (progress 0.5) — this wide oval's straights sit at the ends of its
+    // minor axis, not its major axis, so the flat run is top/bottom and
+    // the tight turns are at the left/right tips.
+    underpassProgress: 0.43,
     barricades: [
       { progress: 0.17, side: 1 },
       { progress: 0.58, side: -1 },
@@ -189,10 +190,9 @@ export const TRACK_LIST: TrackOption[] = [
     potholeProgress: [0.18, 0.55, 0.85],
     bridgeProgress: 0.38,
     crossingProgress: 0.28,
-    // On the run into the finish line (final segment before wrapping back
-    // to progress 0), past the barricade at 0.94 with room to spare before
-    // the starting grid.
-    underpassProgress: 0.97,
+    // On the start/finish straight, well before turn 1 starts at
+    // progress ~0.14.
+    underpassProgress: 0.09,
     barricades: [
       { progress: 0.63, side: 1 },
       { progress: 0.94, side: -1 },
@@ -581,6 +581,7 @@ export function updateLapProgress(car: Car, track: TrackDef): boolean {
   const noseY = car.y + Math.sin(car.angle) * FRONT_OFFSET;
   const { progress, segmentIndex } = trackProgress(track, noseX, noseY, car.segmentHint);
   car.segmentHint = segmentIndex;
+  car.progress = progress;
   const idx = Math.floor(progress * track.checkpointCount) % track.checkpointCount;
 
   if (idx === car.nextCheckpoint) {

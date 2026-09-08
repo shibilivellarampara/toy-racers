@@ -76,6 +76,7 @@ export class App {
 
   private activeHostLobby?: HostLobby;
   private activeGuestLobby?: GuestLobby;
+  private vsComputer = false;
 
   private prevCountdownSecond = -1;
   private prevLap = 0;
@@ -225,6 +226,7 @@ export class App {
         "menu-actions",
         button("Host a Race", "btn btn-primary", () => this.showHostLobby()),
         button("Join a Race", "btn btn-secondary", () => this.showJoinLobby()),
+        button("🖥 Play vs Computer", "btn btn-secondary", () => this.startVsComputer()),
       ),
       h(
         "p",
@@ -353,6 +355,7 @@ export class App {
   }
 
   private beginHostRace(hostLobby: HostLobby) {
+    this.vsComputer = false;
     const input = new InputManager();
     const race = new RaceSession(
       this.track,
@@ -363,6 +366,33 @@ export class App {
       (msg) => hostLobby.broadcast(msg),
     );
     this.activeHostLobby = hostLobby;
+    this.input = input;
+    this.race = race;
+    race.startCountdown(this.selectedMapId);
+    this.showRaceScreen();
+  }
+
+  // Fully local — no lobby, no network — so it doesn't need any of the
+  // WebRTC/relay machinery. isHost is still true because RaceSession uses
+  // that flag to decide who's authoritative for finish order, and here
+  // that's trivially always us.
+  private startVsComputer() {
+    this.teardownRace();
+    this.vsComputer = true;
+    const localInfo = this.localPlayerInfo(0);
+    const CPU_COUNT = 3; // player + 3 bots = 4 cars total
+    const roster: PlayerInfo[] = [localInfo];
+    for (let i = 0; i < CPU_COUNT; i++) {
+      roster.push({
+        id: randomPlayerId(),
+        name: `CPU ${i + 1}`,
+        color: PLAYER_COLORS[(i + 1) % PLAYER_COLORS.length],
+        slot: i + 1,
+        isAI: true,
+      });
+    }
+    const input = new InputManager();
+    const race = new RaceSession(this.track, localInfo, roster, input, true, () => {});
     this.input = input;
     this.race = race;
     race.startCountdown(this.selectedMapId);
@@ -461,6 +491,7 @@ export class App {
   }
 
   private beginGuestRace(guestLobby: GuestLobby) {
+    this.vsComputer = false;
     const input = new InputManager();
     const race = new RaceSession(
       this.track,
@@ -518,10 +549,19 @@ export class App {
     const restart = () => {
       close();
       const hostLobby = this.activeHostLobby;
+      const wasVsComputer = this.vsComputer;
       this.teardownRace();
-      if (hostLobby) this.beginHostRace(hostLobby);
+      if (wasVsComputer) this.startVsComputer();
+      else if (hostLobby) this.beginHostRace(hostLobby);
       else this.showMenu();
     };
+
+    const muteBtn = button(this.profile.muted ? "🔇 Sound Off" : "🔊 Sound On", "btn btn-secondary", () => {
+      this.profile.muted = !this.profile.muted;
+      saveProfile(this.profile);
+      sound.setMuted(this.profile.muted);
+      muteBtn.textContent = this.profile.muted ? "🔇 Sound Off" : "🔊 Sound On";
+    });
 
     const overlay = h(
       "div",
@@ -534,6 +574,7 @@ export class App {
           "div",
           "menu-actions",
           button("▶ Resume", "btn btn-primary", resume),
+          muteBtn,
           race.isHost
             ? button("⟲ Restart Race", "btn btn-secondary", restart)
             : h("p", "hint", "Only the host can restart the race."),
@@ -691,8 +732,10 @@ export class App {
       race.isHost
         ? button("Play Again", "btn btn-primary", () => {
             const hostLobby = this.activeHostLobby;
+            const wasVsComputer = this.vsComputer;
             this.teardownRace();
-            if (hostLobby) this.beginHostRace(hostLobby);
+            if (wasVsComputer) this.startVsComputer();
+            else if (hostLobby) this.beginHostRace(hostLobby);
             else this.showMenu();
           })
         : h("p", "hint", "Waiting for the host to start another race, or head back to the menu."),

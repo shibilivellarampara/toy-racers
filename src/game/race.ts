@@ -1,10 +1,18 @@
-import { Car, DEFAULT_TUNING, resolveCarCollision, resolveStaticCollision } from "./physics";
+import {
+  Car,
+  DEFAULT_TUNING,
+  resolveCarCollision,
+  resolveLineBarrier,
+  resolveMutualCarCollision,
+  resolveStaticCollision,
+} from "./physics";
 import type { InputManager } from "./input";
 import { resolveTrackCollision, startPosition, updateLapProgress } from "./track";
 import type { TrackDef } from "./track";
 import type { NetMessage, PlayerInfo } from "../net/protocol";
 import { sound } from "./sound";
 import { crossingBlocking, crossingLightsActive, trainOffset } from "./crossing";
+import { aiInput } from "./ai";
 
 export interface ImpactEffect {
   x: number;
@@ -14,11 +22,15 @@ export interface ImpactEffect {
 
 export interface RemoteCarView {
   info: PlayerInfo;
-  car: Car; // used purely as a render target; not stepped through physics
+  // Normally just a render target lerped toward network state; for an AI
+  // bot (isAI), this peer is the one actually stepping its physics, so it
+  // holds real simulated state instead.
+  car: Car;
   targetX: number;
   targetY: number;
   targetAngle: number;
   boosting: boolean;
+  isAI: boolean;
 }
 
 export interface RaceResult {
@@ -100,6 +112,7 @@ export class RaceSession {
       targetY: start.y,
       targetAngle: start.angle,
       boosting: false,
+      isAI: info.isAI ?? false,
     });
   }
 
@@ -185,6 +198,49 @@ export class RaceSession {
     this.wasTrainPresent = trainPresent;
   }
 
+  /** Barricades, the rail crossing gate, boost pads, and potholes — shared
+   * between the local car and AI bots. Only the local car's hits make
+   * noise; AI cars resolve the same physics silently. */
+  private applyTrackHazards(car: Car, playSound: boolean): boolean {
+    let hitSolid = false;
+    for (const barricade of this.track.barricades) {
+      if (resolveStaticCollision(car, barricade)) hitSolid = true;
+    }
+    if (crossingBlocking(this.elapsedMs)) {
+      const gate = {
+        x: this.track.crossing.x,
+        y: this.track.crossing.y,
+        angle: this.track.crossing.angle,
+        halfWidth: this.track.crossing.width / 2,
+        // Matches the width of the warning-stripe zone drawn at the
+        // crossing (see RAIL_GAUGE in renderer.ts), not the old radius
+        // reaching all the way out to the road's half-width — that had
+        // the car "hitting" the gate long before it visually got there.
+        halfThickness: 34,
+      };
+      if (resolveLineBarrier(car, gate)) hitSolid = true;
+    }
+    if (car.boostCooldown <= 0) {
+      for (const pad of this.track.boostPads) {
+        if (Math.hypot(car.x - pad.x, car.y - pad.y) <= pad.radius) {
+          car.applyBoost();
+          if (playSound) sound.boost();
+          break;
+        }
+      }
+    }
+    if (car.potholeCooldown <= 0) {
+      for (const hole of this.track.potholes) {
+        if (Math.hypot(car.x - hole.x, car.y - hole.y) <= hole.radius) {
+          car.hitPothole();
+          if (playSound) sound.bump();
+          break;
+        }
+      }
+    }
+    return hitSolid;
+  }
+
   update(dt: number) {
     if (this.countdownMs > 0) {
       this.countdownMs = Math.max(0, this.countdownMs - dt * 1000);
@@ -197,6 +253,24 @@ export class RaceSession {
     }
     this.impacts = this.impacts.filter((imp) => this.elapsedMs - imp.atMs < 500);
 
+    // Only the peer that created an AI bot (always the host, for now —
+    // there's no networked "vs Computer" mode yet) actually simulates it;
+    // anyone else just sees it as an ordinary network-driven remote and
+    // lerps toward its broadcast state like any other player.
+    const aiRemotes = this.isHost ? [...this.remotes.values()].filter((r) => r.isAI) : [];
+
+    // AI bots are simulated by whichever peer created them (see ai.ts) —
+    // step their physics before resolving any collisions this frame.
+    if (this.started) {
+      for (const remote of aiRemotes) {
+        if (remote.car.finished) continue;
+        const laneOffset = Math.sin(remote.info.slot * 2.4) * 0.85;
+        remote.car.step(dt, aiInput(remote.car, this.track, laneOffset));
+        resolveTrackCollision(remote.car, this.track);
+        remote.boosting = remote.car.boosting;
+      }
+    }
+
     if (this.started && !this.localCar.finished) {
       const input = this.input.getInput();
       this.localCar.step(dt, input);
@@ -204,41 +278,17 @@ export class RaceSession {
       this.bumpCooldown = Math.max(0, this.bumpCooldown - dt);
       let hitSomethingSolid = false;
       for (const remote of this.remotes.values()) {
-        if (resolveCarCollision(this.localCar, remote.car)) hitSomethingSolid = true;
+        const hit =
+          remote.isAI && this.isHost
+            ? resolveMutualCarCollision(this.localCar, remote.car)
+            : resolveCarCollision(this.localCar, remote.car);
+        if (hit) hitSomethingSolid = true;
       }
-      for (const barricade of this.track.barricades) {
-        if (resolveStaticCollision(this.localCar, barricade)) hitSomethingSolid = true;
-      }
-      if (crossingBlocking(this.elapsedMs)) {
-        const gate = {
-          x: this.track.crossing.x,
-          y: this.track.crossing.y,
-          radius: this.track.crossing.width / 2 + 6,
-        };
-        if (resolveStaticCollision(this.localCar, gate)) hitSomethingSolid = true;
-      }
+      if (this.applyTrackHazards(this.localCar, true)) hitSomethingSolid = true;
       if (hitSomethingSolid && this.bumpCooldown <= 0) {
         sound.bump();
         this.impacts.push({ x: this.localCar.x, y: this.localCar.y, atMs: this.elapsedMs });
         this.bumpCooldown = 0.35;
-      }
-      if (this.localCar.boostCooldown <= 0) {
-        for (const pad of this.track.boostPads) {
-          if (Math.hypot(this.localCar.x - pad.x, this.localCar.y - pad.y) <= pad.radius) {
-            this.localCar.applyBoost();
-            sound.boost();
-            break;
-          }
-        }
-      }
-      if (this.localCar.potholeCooldown <= 0) {
-        for (const hole of this.track.potholes) {
-          if (Math.hypot(this.localCar.x - hole.x, this.localCar.y - hole.y) <= hole.radius) {
-            this.localCar.hitPothole();
-            sound.bump();
-            break;
-          }
-        }
       }
       const completedNow = updateLapProgress(this.localCar, this.track);
       if (completedNow) {
@@ -260,7 +310,21 @@ export class RaceSession {
       }
     }
 
+    if (this.started) {
+      for (let i = 0; i < aiRemotes.length; i++) {
+        const remote = aiRemotes[i];
+        if (remote.car.finished) continue;
+        for (let j = i + 1; j < aiRemotes.length; j++) {
+          if (!aiRemotes[j].car.finished) resolveMutualCarCollision(remote.car, aiRemotes[j].car);
+        }
+        this.applyTrackHazards(remote.car, false);
+        const completedNow = updateLapProgress(remote.car, this.track);
+        if (completedNow && this.isHost) this.checkFinish(remote.info.id, this.elapsedMs);
+      }
+    }
+
     for (const remote of this.remotes.values()) {
+      if (remote.isAI && this.isHost) continue;
       const smoothing = Math.min(1, dt * 14);
       remote.car.x = lerp(remote.car.x, remote.targetX, smoothing);
       remote.car.y = lerp(remote.car.y, remote.targetY, smoothing);
@@ -282,6 +346,21 @@ export class RaceSession {
         fin: this.localCar.finished,
         boost: this.localCar.boosting,
       });
+      if (this.isHost) {
+        for (const remote of aiRemotes) {
+          this.sendFn({
+            type: "state",
+            id: remote.info.id,
+            x: remote.car.x,
+            y: remote.car.y,
+            angle: remote.car.angle,
+            lap: remote.car.lap,
+            cp: remote.car.nextCheckpoint,
+            fin: remote.car.finished,
+            boost: remote.car.boosting,
+          });
+        }
+      }
     }
   }
 
