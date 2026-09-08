@@ -161,6 +161,7 @@ export class App {
     this.race = undefined;
     this.resultsShown = false;
     sound.stopEngine();
+    sound.stopTrainRumble();
   }
 
   // ---------------------------------------------------------------- Menu --
@@ -661,6 +662,7 @@ export class App {
   private showResults(race: RaceSession) {
     this.loop?.stop();
     sound.stopEngine();
+    sound.stopTrainRumble();
     this.canvas.classList.remove("visible");
     document.body.classList.remove("racing");
 

@@ -4,7 +4,7 @@ import { resolveTrackCollision, startPosition, updateLapProgress } from "./track
 import type { TrackDef } from "./track";
 import type { NetMessage, PlayerInfo } from "../net/protocol";
 import { sound } from "./sound";
-import { crossingBlocking, crossingLightsActive } from "./crossing";
+import { crossingBlocking, crossingLightsActive, trainOffset } from "./crossing";
 
 export interface ImpactEffect {
   x: number;
@@ -62,6 +62,7 @@ export class RaceSession {
   private bumpCooldown = 0;
   private wasCrossingWarning = false;
   private wasCrossingBlocking = false;
+  private wasTrainPresent = false;
   private roster: PlayerInfo[];
 
   constructor(
@@ -175,6 +176,13 @@ export class RaceSession {
     const blocking = crossingBlocking(this.elapsedMs);
     if (blocking && !this.wasCrossingBlocking) sound.trainHorn();
     this.wasCrossingBlocking = blocking;
+
+    const trainPos = trainOffset(this.elapsedMs);
+    const trainPresent = trainPos !== null;
+    if (trainPresent && !this.wasTrainPresent) sound.startTrainRumble();
+    if (trainPresent) sound.updateTrainRumble(1 - Math.abs(trainPos ?? 0));
+    if (!trainPresent && this.wasTrainPresent) sound.stopTrainRumble();
+    this.wasTrainPresent = trainPresent;
   }
 
   update(dt: number) {

@@ -9,6 +9,9 @@ class SoundEngine {
   private muted = false;
   private engineOsc: OscillatorNode | null = null;
   private engineGain: GainNode | null = null;
+  private trainOsc: OscillatorNode | null = null;
+  private trainOsc2: OscillatorNode | null = null;
+  private trainGain: GainNode | null = null;
 
   setMuted(muted: boolean) {
     this.muted = muted;
@@ -131,6 +134,57 @@ class SoundEngine {
     const volume = this.muted || clamped <= 0.02 ? 0.0001 : 0.04 + Math.min(clamped, 1) * 0.06;
     this.engineOsc.frequency.setTargetAtTime(freq, ctx.currentTime, 0.08);
     this.engineGain.gain.setTargetAtTime(volume, ctx.currentTime, 0.12);
+  }
+
+  /** Starts a continuous rumble for as long as the train is on screen —
+   * two slightly detuned low oscillators for a rolling-wheels texture,
+   * rather than one pure tone. Call updateTrainRumble() every frame while
+   * it's active to fade the volume with how close the train is. */
+  startTrainRumble() {
+    const ctx = this.ensure();
+    if (!ctx || this.trainOsc) return;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.0001;
+    gain.connect(ctx.destination);
+    const osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.value = 50;
+    osc.connect(gain);
+    const osc2 = ctx.createOscillator();
+    osc2.type = "sawtooth";
+    osc2.frequency.value = 54;
+    osc2.connect(gain);
+    osc.start();
+    osc2.start();
+    this.trainOsc = osc;
+    this.trainOsc2 = osc2;
+    this.trainGain = gain;
+  }
+
+  /** intensity: 0..1, how present the train should sound right now. */
+  updateTrainRumble(intensity: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.trainGain) return;
+    const clamped = Math.max(0, Math.min(1, intensity));
+    const volume = this.muted ? 0.0001 : 0.07 * clamped;
+    this.trainGain.gain.setTargetAtTime(volume, ctx.currentTime, 0.15);
+  }
+
+  stopTrainRumble() {
+    if (this.trainOsc) {
+      try {
+        this.trainOsc.stop();
+        this.trainOsc2?.stop();
+      } catch {
+        /* already stopped */
+      }
+      this.trainOsc.disconnect();
+      this.trainOsc2?.disconnect();
+      this.trainGain?.disconnect();
+    }
+    this.trainOsc = null;
+    this.trainOsc2 = null;
+    this.trainGain = null;
   }
 
   stopEngine() {

@@ -273,6 +273,25 @@ function drawCrossing(ctx: CanvasRenderingContext2D, track: TrackDef, elapsedMs:
   for (let py = -halfW + 6; py < halfW; py += 16) {
     ctx.fillRect(-crossSpan / 2, py, crossSpan, 8);
   }
+
+  // stop line + give-way triangles a car-length before the crossing on
+  // both approaches, so there's a clear "stop here" marking ahead of the
+  // gates rather than the gate being the only sign anything's coming
+  const stopOffset = crossSpan / 2 + 38;
+  for (const dir of [-1, 1] as const) {
+    ctx.fillStyle = "#f4f4f4";
+    ctx.fillRect(dir * stopOffset - 4, -halfW + 6, 8, width - 12);
+    const triCount = 3;
+    for (let t = 0; t < triCount; t++) {
+      const ty = -halfW + 6 + ((width - 12) / triCount) * (t + 0.5);
+      ctx.beginPath();
+      ctx.moveTo(dir * stopOffset + dir * 6, ty);
+      ctx.lineTo(dir * stopOffset + dir * 18, ty - 7);
+      ctx.lineTo(dir * stopOffset + dir * 18, ty + 7);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
   ctx.restore();
 
   drawTrain(ctx, track, elapsedMs);
@@ -289,13 +308,16 @@ function drawTrain(ctx: CanvasRenderingContext2D, track: TrackDef, elapsedMs: nu
   if (offset === null) return;
   const { x, y, angle, width } = track.crossing;
   const perpAngle = angle + Math.PI / 2;
-  const halfW = width / 2;
   const travelRange = width * 1.2 + 220;
   const leadPos = offset * travelRange;
-  const carLen = 46;
-  const gap = 5;
-  const carW = Math.max(28, halfW * 1.6);
-  const carCount = 4;
+  // A train car's own width is fixed (roughly the rail gauge) — it must
+  // not scale with the road's width, which was the bug: on wide roads
+  // carW ended up bigger than carLen, making the train look wider than
+  // it was long.
+  const carLen = 72;
+  const carW = 30;
+  const gap = 6;
+  const carCount = 6;
 
   for (let i = 0; i < carCount; i++) {
     const pos = leadPos - i * (carLen + gap);
@@ -342,6 +364,28 @@ function drawTrain(ctx: CanvasRenderingContext2D, track: TrackDef, elapsedMs: nu
       ctx.fill();
       ctx.fillStyle = "#0f1226";
       ctx.fillRect(carLen / 2 - 14, -carW / 2 + 5, 9, carW - 10);
+
+      // smokestack, with puffs drifting back over the rest of the train
+      // and fading out as they age
+      const stackX = carLen * 0.05;
+      ctx.fillStyle = "#1c1e24";
+      ctx.beginPath();
+      ctx.arc(stackX, 0, 4, 0, Math.PI * 2);
+      ctx.fill();
+      const t = performance.now() / 1000;
+      const puffCount = 5;
+      for (let p = 0; p < puffCount; p++) {
+        const age = (t * 0.6 + p / puffCount) % 1;
+        const puffX = stackX - age * 46;
+        const puffY = Math.sin(p * 2.1 + t * 0.8) * age * 12;
+        const r = 4 + age * 11;
+        ctx.globalAlpha = (1 - age) * 0.5;
+        ctx.fillStyle = "#d1d5db";
+        ctx.beginPath();
+        ctx.arc(puffX, puffY, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
     } else {
       // evenly spaced windows along the car — a glassy blue, deliberately
       // not yellow so it doesn't read as more crossing-hazard striping
@@ -417,11 +461,10 @@ function drawGateAndLights(
   ctx.fill();
 
   ctx.rotate(armWorldAngle);
-  // Deliberately short of the road's centerline (rather than the old
-  // halfW+14, which overshot and made both posts' arms meet mid-road as
-  // one continuous line) — each arm blocks its own side, leaving them
-  // visually distinct instead of reading as a single bar down the middle.
-  const armLen = halfW * 0.82;
+  // Reaches to just short of the centerline (postDist minus a small 6px
+  // gap) — long enough that the two arms visually close off the whole
+  // road when down, but not so long they overlap into one continuous bar.
+  const armLen = postDist - 6;
   const stripe = 12;
   for (let i = 0; i < armLen; i += stripe) {
     ctx.fillStyle = Math.floor(i / stripe) % 2 === 0 ? "#e11d2e" : "#ffffff";
@@ -654,6 +697,14 @@ export function drawCar(ctx: CanvasRenderingContext2D, rc: RenderCar) {
 
   const len = 34;
   const wid = 18;
+
+  // ground shadow cast onto the road — offset from the car body rather
+  // than centered under it, so it actually reads as a cast shadow instead
+  // of a soft outline
+  ctx.fillStyle = "rgba(0,0,0,0.32)";
+  ctx.beginPath();
+  ctx.ellipse(2.5, 3.5, len * 0.52, wid * 0.5, 0, 0, Math.PI * 2);
+  ctx.fill();
 
   if (rc.boosting) {
     ctx.save();
