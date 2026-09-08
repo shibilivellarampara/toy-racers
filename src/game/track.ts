@@ -243,7 +243,12 @@ export const TRACK_LIST: TrackOption[] = [
     bridgeProgress: 0.15,
     potholeProgress: [0.25, 0.45, 0.78],
     boostProgress: [0.32, 0.55, 0.85],
-    crossingProgress: 0.65,
+    // Right in the middle of the long straight segment (progress
+    // 0.571-0.684), not close to either end — the gate's resting arm is a
+    // rigid straight bar, so placing it near a bend (where the road's
+    // real curvature diverges from the segment's single fixed direction)
+    // let it drift off the road's actual edge into the mud.
+    crossingProgress: 0.63,
     barricades: [
       { progress: 0.4, side: 1 },
       { progress: 0.72, side: -1 },

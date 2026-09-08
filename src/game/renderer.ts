@@ -422,12 +422,20 @@ function drawGateAndLights(
   const { x, y, angle, width } = track.crossing;
   const perpAngle = angle + Math.PI / 2;
   const halfW = width / 2;
+  // Sitting exactly on the rails (the crossing's own x/y) read as "gate in
+  // the middle of the track" — real gates stand just short of the tracks,
+  // at the near edge of the warning-stripe zone, not centered on the
+  // rails themselves. Shift back along the road by that same amount.
+  const crossSpan = RAIL_GAUGE + 12;
+  const alongOffset = -(crossSpan / 2 + 10);
+  const baseX = x + Math.cos(angle) * alongOffset;
+  const baseY = y + Math.sin(angle) * alongOffset;
   // Out in the grass beyond the kerb, not right on top of it, so the post
   // reads as its own roadside structure rather than blending into the
   // kerb stripe.
   const postDist = halfW + 24;
-  const postX = x + Math.cos(perpAngle) * postDist * side;
-  const postY = y + Math.sin(perpAngle) * postDist * side;
+  const postX = baseX + Math.cos(perpAngle) * postDist * side;
+  const postY = baseY + Math.sin(perpAngle) * postDist * side;
 
   // Resting ("up") the arm lies alongside the road, out of the way; fully
   // down it points from this post back toward the road's centerline,
