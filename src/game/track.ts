@@ -188,7 +188,13 @@ export const TRACK_LIST: TrackOption[] = [
     centerline: TECHNICAL_TWISTER,
     boostProgress: [0.03, 0.42, 0.72],
     potholeProgress: [0.18, 0.55, 0.85],
-    bridgeProgress: 0.38,
+    // This track's hairpins loop back close to themselves almost
+    // everywhere, so the river's reach (~500-600px either side of the
+    // bridge) crossed over other parts of the road except right near the
+    // start/finish straight — that was the "rivers inside the race"
+    // problem. 0.38 (used to sit right next to hairpin 1) is replaced
+    // with a spot on the straight that has real clearance.
+    bridgeProgress: 0.055,
     crossingProgress: 0.28,
     // On the start/finish straight, well before turn 1 starts at
     // progress ~0.14.

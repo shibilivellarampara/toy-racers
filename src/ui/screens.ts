@@ -226,7 +226,7 @@ export class App {
         "menu-actions",
         button("Host a Race", "btn btn-primary", () => this.showHostLobby()),
         button("Join a Race", "btn btn-secondary", () => this.showJoinLobby()),
-        button("🖥 Play vs Computer", "btn btn-secondary", () => this.startVsComputer()),
+        button("🖥 Play vs Computer", "btn btn-secondary", () => this.showVsComputerSetup()),
       ),
       h(
         "p",
@@ -370,6 +370,33 @@ export class App {
     this.race = race;
     race.startCountdown(this.selectedMapId);
     this.showRaceScreen();
+  }
+
+  private showVsComputerSetup() {
+    const mapEl = h("div", "map-list");
+    const renderMaps = () => {
+      mapEl.replaceChildren(
+        ...TRACK_LIST.map((m) =>
+          button(m.name, `map-option${m.id === this.selectedMapId ? " selected" : ""}`, () => {
+            this.selectedMapId = m.id;
+            this.track = buildTrack(m.id);
+            renderMaps();
+          }),
+        ),
+      );
+    };
+    renderMaps();
+
+    const screen = h(
+      "div",
+      "screen lobby-screen",
+      h("h2", "title", "Play vs Computer"),
+      h("div", "field-label", "Map", mapEl),
+      h("p", "hint", "You + 3 computer racers, no connection needed."),
+      h("div", "menu-actions", button("Start Race", "btn btn-primary btn-start", () => this.startVsComputer())),
+      button("Back", "btn btn-ghost", () => this.showMenu()),
+    );
+    this.setScreen(screen);
   }
 
   // Fully local — no lobby, no network — so it doesn't need any of the
@@ -595,7 +622,12 @@ export class App {
     this.updateHud(race, hud);
     this.updateSounds(race);
 
-    if (race.isRaceComplete && !this.resultsShown) {
+    // In a real multiplayer race, wait for everyone so all players see the
+    // same final standings together. Against computer bots there's no one
+    // else actually waiting, so show results as soon as the local player
+    // finishes rather than sitting there until the slowest bot crosses.
+    const done = this.vsComputer ? race.localCar.finished : race.isRaceComplete;
+    if (done && !this.resultsShown) {
       this.resultsShown = true;
       sound.finish();
       setTimeout(() => this.showResults(race), 1200);
@@ -614,9 +646,14 @@ export class App {
       this.prevCountdownSecond = 0;
     }
 
-    const speedRatio = race.started
-      ? Math.abs(race.localCar.speed) / race.localCar.tuning.maxSpeed
-      : 0;
+    // Once the car finishes, race.ts stops stepping its physics entirely,
+    // so car.speed is frozen at whatever it was the instant it crossed the
+    // line — without this check the engine kept humming at that fixed
+    // pitch indefinitely instead of dying away.
+    const speedRatio =
+      race.started && !race.localCar.finished
+        ? Math.abs(race.localCar.speed) / race.localCar.tuning.maxSpeed
+        : 0;
     sound.updateEngine(speedRatio);
 
     if (race.localCar.lap > this.prevLap) {

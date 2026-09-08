@@ -275,13 +275,15 @@ function drawCrossing(ctx: CanvasRenderingContext2D, track: TrackDef, elapsedMs:
   }
 
   // double white stop line a car-length before the crossing on both
-  // approaches, so there's a clear "stop here" marking ahead of the gates
-  // rather than the gate being the only sign anything's coming
+  // approaches, so there's a clear "stop here" marking ahead of the gate
+  // rather than the gate being the only sign anything's coming. The two
+  // strokes need a real gap between them or they just read as one thick
+  // line — they were only 2px apart before.
   const stopOffset = crossSpan / 2 + 38;
   ctx.fillStyle = "#f4f4f4";
   for (const dir of [-1, 1] as const) {
-    ctx.fillRect(dir * stopOffset - 5, -halfW + 6, 4, width - 12);
-    ctx.fillRect(dir * stopOffset + dir * 5 - 2, -halfW + 6, 4, width - 12);
+    ctx.fillRect(dir * stopOffset - 2, -halfW + 6, 4, width - 12);
+    ctx.fillRect(dir * stopOffset + dir * 12 - 2, -halfW + 6, 4, width - 12);
   }
   ctx.restore();
 
@@ -413,9 +415,9 @@ function drawGateAndLights(
   const { x, y, angle, width } = track.crossing;
   const perpAngle = angle + Math.PI / 2;
   const halfW = width / 2;
-  // Stand the post out in the grass beyond the kerb (not right on top of
-  // it) so it reads as its own structure at the roadside, next to the
-  // railway, instead of blending into the kerb stripe.
+  // Out in the grass beyond the kerb, not right on top of it, so the post
+  // reads as its own roadside structure rather than blending into the
+  // kerb stripe.
   const postDist = halfW + 24;
   const postX = x + Math.cos(perpAngle) * postDist * side;
   const postY = y + Math.sin(perpAngle) * postDist * side;
@@ -433,8 +435,6 @@ function drawGateAndLights(
   ctx.save();
   ctx.translate(postX, postY);
 
-  // post base, wider than the old 8x8 blob so it doesn't disappear against
-  // the kerb colors
   ctx.fillStyle = "#3f2a17";
   ctx.fillRect(-6, -6, 12, 12);
   ctx.fillStyle = "#5c3d21";
@@ -451,27 +451,10 @@ function drawGateAndLights(
   ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
   ctx.fill();
 
-  // crossbuck sign — the universal railroad-crossing "X" — fixed to the
-  // post itself (not rotating with the arm), so the post unmistakably
-  // reads as its own roadside structure rather than the arm just floating
-  // in space
-  ctx.save();
-  ctx.translate(0, -16);
-  ctx.strokeStyle = "#f4f4f4";
-  ctx.lineWidth = 4;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(-9, -9);
-  ctx.lineTo(9, 9);
-  ctx.moveTo(9, -9);
-  ctx.lineTo(-9, 9);
-  ctx.stroke();
-  ctx.restore();
-
   ctx.rotate(armWorldAngle);
-  // Reaches to just short of the centerline (postDist minus a small 6px
-  // gap) — long enough that the two arms visually close off the whole
-  // road when down, but not so long they overlap into one continuous bar.
+  // Reaches to just short of the centerline (postDist minus a small gap)
+  // — long enough that the two arms visually close off the whole road
+  // when down, but not so long they overlap into one continuous bar.
   const armLen = postDist - 6;
   const stripe = 12;
   for (let i = 0; i < armLen; i += stripe) {
