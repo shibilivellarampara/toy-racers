@@ -1,8 +1,6 @@
 import type { CarInput } from "./physics";
 import { sound } from "./sound";
 
-export type ControlScheme = "joystick" | "buttons";
-
 const KEY_MAP: Record<string, keyof typeof KEYS_DEFAULT> = {
   ArrowUp: "up",
   ArrowDown: "down",
@@ -84,95 +82,19 @@ class TouchButton {
   }
 }
 
-const JOYSTICK_RADIUS = 38;
-
-class Joystick {
-  readonly el: HTMLDivElement;
-  private knob: HTMLDivElement;
-  private activeId: number | null = null;
-  private originX = 0;
-  private originY = 0;
-  private value = 0; // -1..1, horizontal only
-  private unregister: () => void;
-
-  constructor() {
-    this.el = document.createElement("div");
-    this.el.className = "joystick-base";
-    this.el.style.touchAction = "none";
-    this.knob = document.createElement("div");
-    this.knob.className = "joystick-knob";
-    this.el.appendChild(this.knob);
-
-    this.el.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      sound.unlock();
-      this.activeId = e.pointerId;
-      try {
-        this.el.setPointerCapture(e.pointerId);
-      } catch {
-        /* ignore */
-      }
-      const rect = this.el.getBoundingClientRect();
-      this.originX = rect.left + rect.width / 2;
-      this.originY = rect.top + rect.height / 2;
-      this.updateFromEvent(e);
-    });
-    this.el.addEventListener("pointermove", (e) => {
-      if (e.pointerId !== this.activeId) return;
-      this.updateFromEvent(e);
-    });
-    const release = (e: PointerEvent) => {
-      if (e.pointerId !== this.activeId) return;
-      this.reset();
-    };
-    this.el.addEventListener("pointerup", release);
-    this.el.addEventListener("pointercancel", release);
-    this.el.addEventListener("lostpointercapture", release);
-    this.el.addEventListener("contextmenu", (e) => e.preventDefault());
-    this.unregister = registerForceRelease(() => this.reset());
-  }
-
-  private reset() {
-    this.activeId = null;
-    this.value = 0;
-    this.knob.style.transform = "translate(0px, 0px)";
-  }
-
-  destroy() {
-    this.unregister();
-  }
-
-  private updateFromEvent(e: PointerEvent) {
-    let dx = e.clientX - this.originX;
-    let dy = e.clientY - this.originY;
-    const dist = Math.hypot(dx, dy);
-    if (dist > JOYSTICK_RADIUS) {
-      dx = (dx / dist) * JOYSTICK_RADIUS;
-      dy = (dy / dist) * JOYSTICK_RADIUS;
-    }
-    this.knob.style.transform = `translate(${dx}px, ${dy}px)`;
-    this.value = dx / JOYSTICK_RADIUS;
-  }
-
-  get steer() {
-    return this.activeId !== null ? this.value : 0;
-  }
-}
-
 export class InputManager {
   private keys = { ...KEYS_DEFAULT };
-  private joystick: Joystick | null = null;
   private touch: {
     gas: TouchButton;
     brake: TouchButton;
-    left: TouchButton | null;
-    right: TouchButton | null;
+    left: TouchButton;
+    right: TouchButton;
   };
   /** Touch control buttons, not attached to the DOM yet — the caller decides where/when. */
   readonly element: HTMLDivElement;
   enabled = true;
 
-  constructor(scheme: ControlScheme = "joystick") {
+  constructor() {
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
 
@@ -182,17 +104,10 @@ export class InputManager {
     const steerWrap = document.createElement("div");
     steerWrap.className = "touch-group touch-group--left";
 
-    let left: TouchButton | null = null;
-    let right: TouchButton | null = null;
-    if (scheme === "buttons") {
-      left = new TouchButton("◀", "touch-steer");
-      right = new TouchButton("▶", "touch-steer");
-      steerWrap.appendChild(left.el);
-      steerWrap.appendChild(right.el);
-    } else {
-      this.joystick = new Joystick();
-      steerWrap.appendChild(this.joystick.el);
-    }
+    const left = new TouchButton("◀", "touch-steer");
+    const right = new TouchButton("▶", "touch-steer");
+    steerWrap.appendChild(left.el);
+    steerWrap.appendChild(right.el);
 
     const pedalWrap = document.createElement("div");
     pedalWrap.className = "touch-group touch-group--right";
@@ -223,9 +138,9 @@ export class InputManager {
 
   getInput(): CarInput {
     if (!this.enabled) return { throttle: 0, steer: 0 };
-    let steer = this.joystick?.steer ?? 0;
-    if (this.keys.left || this.touch.left?.pressed) steer -= 1;
-    if (this.keys.right || this.touch.right?.pressed) steer += 1;
+    let steer = 0;
+    if (this.keys.left || this.touch.left.pressed) steer -= 1;
+    if (this.keys.right || this.touch.right.pressed) steer += 1;
 
     let throttle = 0;
     if (this.keys.up || this.touch.gas.pressed) throttle += 1;
@@ -237,11 +152,10 @@ export class InputManager {
   destroy() {
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
-    this.joystick?.destroy();
     this.touch.gas.destroy();
     this.touch.brake.destroy();
-    this.touch.left?.destroy();
-    this.touch.right?.destroy();
+    this.touch.left.destroy();
+    this.touch.right.destroy();
     this.element.remove();
   }
 }

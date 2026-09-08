@@ -355,12 +355,14 @@ function drawTrain(ctx: CanvasRenderingContext2D, track: TrackDef, elapsedMs: nu
       }
     }
 
-    // wheel trucks peeking past the body's long edges
+    // wheel trucks (bogies) peeking past the body's long edges — the axle
+    // runs across the direction of travel, so each nub should be taller
+    // across (perpendicular) than it is long, not the other way around
     ctx.fillStyle = "#111318";
-    ctx.fillRect(-carLen * 0.28, -carW / 2 - 2, 8, 6);
-    ctx.fillRect(carLen * 0.08, -carW / 2 - 2, 8, 6);
-    ctx.fillRect(-carLen * 0.28, carW / 2 - 4, 8, 6);
-    ctx.fillRect(carLen * 0.08, carW / 2 - 4, 8, 6);
+    ctx.fillRect(-carLen * 0.26, -carW / 2 - 4, 6, 10);
+    ctx.fillRect(carLen * 0.1, -carW / 2 - 4, 6, 10);
+    ctx.fillRect(-carLen * 0.26, carW / 2 - 6, 6, 10);
+    ctx.fillRect(carLen * 0.1, carW / 2 - 6, 6, 10);
 
     ctx.restore();
   }
